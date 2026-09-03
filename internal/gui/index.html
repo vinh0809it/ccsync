@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ccsync</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%235a48f5'/%3E%3Cstop offset='1' stop-color='%237b6bff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='256' height='256' rx='56' fill='url(%23g)'/%3E%3Cg fill='none' stroke='white' stroke-width='18' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M56 128a72 72 0 0 1 123-51l21 21'/%3E%3Cpath d='M200 56v40h-40'/%3E%3Cpath d='M200 128a72 72 0 0 1-123 51l-21-21'/%3E%3Cpath d='M56 200v-40h40'/%3E%3C/g%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #eef1f6; --bg2: #e4e8f0; --card: #ffffff; --card2: #f7f9fc;
+    --ink: #17203a; --muted: #5f6b85; --faint: #8b95ab;
+    --line: #e1e6f0; --line2: #eef1f7;
+    --accent: #5a48f5; --accent2: #7b6bff; --accent-ink: #ffffff;
+    --accent-soft: #ece9ff;
+    --ok: #16875a; --warn: #b3560e; --warn-soft: #fdeede; --err: #c62a2a;
+    --shadow: 0 1px 2px rgba(23,32,58,.06), 0 8px 28px rgba(23,32,58,.08);
+    --shadow-lg: 0 12px 48px rgba(23,32,58,.22);
+    --radius: 16px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0c0f17; --bg2: #0f131d; --card: #161b28; --card2: #1c2231;
+      --ink: #eaeef8; --muted: #98a3bd; --faint: #6b7592;
+      --line: #262d3e; --line2: #202636;
+      --accent: #7d6dff; --accent2: #9a8cff; --accent-ink: #0a0d15;
+      --accent-soft: #221f3d;
+      --ok: #4fc98a; --warn: #f0a35e; --warn-soft: #2c2213; --err: #ff6b6b;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 34px rgba(0,0,0,.45);
+      --shadow-lg: 0 16px 60px rgba(0,0,0,.6);
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    background:
+      radial-gradient(1200px 600px at 100% -10%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 60%),
+      radial-gradient(1000px 500px at -10% 110%, color-mix(in srgb, var(--accent2) 10%, transparent), transparent 55%),
+      linear-gradient(180deg, var(--bg), var(--bg2));
+    color: var(--ink);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    min-height: 100%;
+  }
+  button { font: inherit; cursor: pointer; border: 0; }
+  button:disabled { opacity: .5; cursor: default; }
+  .hidden { display: none !important; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .muted { color: var(--muted); }
+
+  /* App bar */
+  .appbar {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; align-items: center; gap: 14px;
+    padding: 14px clamp(16px, 4vw, 40px);
+    background: color-mix(in srgb, var(--card) 82%, transparent);
+    backdrop-filter: saturate(1.4) blur(14px);
+    border-bottom: 1px solid var(--line);
+  }
+  .brand { display: flex; align-items: center; gap: 11px; }
+  .logo {
+    width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  .brand b { font-size: 17px; letter-spacing: -.02em; }
+  .brand span { font-size: 12px; color: var(--muted); display: block; margin-top: -2px; }
+  .spacer { flex: 1; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 7px; max-width: 42vw;
+    padding: 6px 12px; border-radius: 999px; font-size: 12.5px;
+    background: var(--card2); border: 1px solid var(--line); color: var(--muted);
+  }
+  .chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
+  .chip .repo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Layout */
+  .wrap { max-width: 1500px; margin: 0 auto; padding: clamp(16px, 3vw, 30px); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(16px, 2vw, 24px);
+    align-items: start; }
+  @media (max-width: 940px) { .grid { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: var(--radius); box-shadow: var(--shadow);
+    display: flex; flex-direction: column; overflow: hidden;
+    max-height: calc(100vh - 150px);
+  }
+  @media (max-width: 940px) { .card { max-height: none; } }
+  .card-head { padding: 18px 20px 14px; border-bottom: 1px solid var(--line2);
+    display: flex; flex-direction: column; gap: 12px; }
+  .card-head .titlerow { display: flex; align-items: center; gap: 10px; }
+  .card-head h2 { font-size: 15px; letter-spacing: -.01em; }
+  .card-head h2 .count { color: var(--faint); font-weight: 500; margin-left: 6px; }
+  .card-body { overflow-y: auto; padding: 6px 10px 12px; flex: 1; min-height: 120px; }
+
+  select {
+    width: 100%; padding: 10px 12px; border-radius: 10px; font: inherit;
+    background: var(--card2); color: var(--ink); border: 1px solid var(--line);
+    -webkit-appearance: none; appearance: none;
+    background-image: linear-gradient(45deg, transparent 50%, var(--faint) 50%),
+                      linear-gradient(135deg, var(--faint) 50%, transparent 50%);
+    background-position: right 15px center, right 10px center;
+    background-size: 5px 5px, 5px 5px; background-repeat: no-repeat;
+  }
+  input[type=text], input[type=password], input:not([type]) {
+    width: 100%; padding: 10px 12px; border-radius: 10px; font: inherit;
+    background: var(--card2); color: var(--ink); border: 1px solid var(--line);
+  }
+  input:focus, select:focus { outline: none; border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft); }
+  label { display: block; font-size: 12.5px; color: var(--muted); margin: 12px 0 5px;
+    font-weight: 500; }
+  .note { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px; justify-content: center;
+    padding: 9px 16px; border-radius: 10px; font-weight: 600; font-size: 14px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: var(--accent-ink);
+    box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 35%, transparent);
+    transition: transform .08s, box-shadow .15s, opacity .15s;
+  }
+  .btn:not(:disabled):hover { transform: translateY(-1px);
+    box-shadow: 0 7px 20px color-mix(in srgb, var(--accent) 45%, transparent); }
+  .btn:not(:disabled):active { transform: translateY(0); }
+  .btn.ghost { background: var(--card2); color: var(--ink); border: 1px solid var(--line);
+    box-shadow: none; }
+  .btn.ghost:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
+  .btn.sm { padding: 6px 12px; font-size: 13px; }
+
+  .search { position: relative; display: flex; align-items: center; }
+  .search svg { position: absolute; left: 12px; color: var(--faint); pointer-events: none; }
+  .search input { padding-left: 34px; }
+  .toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .toolbar .grow { flex: 1; }
+  .selall { display: inline-flex; align-items: center; gap: 8px; font-size: 13px;
+    color: var(--muted); cursor: pointer; user-select: none; }
+  .selall input[type=checkbox] { width: 17px; height: 17px; accent-color: var(--accent);
+    cursor: pointer; }
+
+  /* Session rows */
+  .rows { display: flex; flex-direction: column; gap: 6px; }
+  .row {
+    display: flex; align-items: center; gap: 13px; padding: 11px 12px;
+    border-radius: 12px; border: 1px solid transparent; cursor: pointer;
+    transition: background .12s, border-color .12s;
+  }
+  .row:hover { background: var(--card2); }
+  .row.on { background: var(--accent-soft);
+    border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+  .row .box {
+    width: 20px; height: 20px; border-radius: 6px; flex: none; position: relative;
+    border: 2px solid var(--faint); background: var(--card2); transition: .12s;
+  }
+  .row:hover .box { border-color: var(--accent); }
+  .row.on .box { background: var(--accent); border-color: var(--accent); }
+  .row.on .box::after { content: ""; position: absolute; left: 5px; top: 1px;
+    width: 6px; height: 11px; border: solid #fff; border-width: 0 2px 2px 0;
+    transform: rotate(45deg); }
+  .row .main { flex: 1; min-width: 0; }
+  .row .ttl { font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .row .ttl .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .sub { font-size: 12px; color: var(--faint); margin-top: 2px; }
+  .row .side { text-align: right; flex: none; }
+  .row .side .t { font-size: 12px; color: var(--muted); }
+  .row .side .s { font-size: 11.5px; color: var(--faint); }
+  .badge { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+    letter-spacing: .03em; text-transform: uppercase; flex: none; white-space: nowrap; }
+  .badge.active { background: var(--warn); color: #fff; }
+  .empty { text-align: center; color: var(--faint); padding: 40px 20px; font-size: 13.5px; }
+
+  /* Store rows carry a pull button on the side */
+  .row.store { cursor: default; }
+  .row.store:hover { background: var(--card2); }
+
+  /* Spinner */
+  .spin { width: 15px; height: 15px; border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+    border-top-color: currentColor; border-radius: 50%; display: inline-block;
+    animation: spin .65s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Lock / setup screen */
+  .lockwrap { min-height: calc(100vh - 66px); display: grid; place-items: center;
+    padding: 24px; }
+  .lockcard { width: 100%; max-width: 460px; background: var(--card);
+    border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow);
+    padding: 30px 28px; }
+  .lockcard .logo { width: 46px; height: 46px; border-radius: 13px; margin-bottom: 16px; }
+  .lockcard h1 { font-size: 21px; letter-spacing: -.02em; }
+  .lockcard .note { margin: 8px 0 4px; }
+
+  /* Dialogs — centered, the * { margin:0 } reset is overridden here */
+  dialog {
+    margin: auto; border: 1px solid var(--line); border-radius: 18px;
+    background: var(--card); color: var(--ink); padding: 0;
+    max-width: 540px; width: min(92vw, 540px); box-shadow: var(--shadow-lg);
+  }
+  dialog::backdrop { background: rgba(10,12,22,.5); backdrop-filter: blur(3px); }
+  dialog[open] { animation: pop .16s ease-out; }
+  @keyframes pop { from { transform: scale(.96); opacity: 0; } }
+  .dlg-head { padding: 20px 22px 8px; }
+  .dlg-head h2 { font-size: 17px; letter-spacing: -.01em; }
+  .dlg-body { padding: 4px 22px; }
+  .dlg-foot { padding: 16px 22px 20px; display: flex; align-items: center; gap: 10px; }
+  .pushlist { list-style: none; padding: 0; margin: 8px 0; max-height: 44vh; overflow-y: auto; }
+  .pushlist li { padding: 9px 12px; border-radius: 10px; background: var(--card2);
+    border: 1px solid var(--line2); margin-bottom: 6px; }
+  .pushlist li .ttl { font-weight: 600; font-size: 13.5px; }
+  .pushlist li .mono { font-size: 12px; color: var(--faint); }
+  code.copy { cursor: pointer; background: var(--card2); border: 1px solid var(--line);
+    border-radius: 8px; padding: 4px 8px; display: inline-block; word-break: break-all;
+    font-size: 12.5px; }
+  .donebox { margin-top: 12px; padding: 12px; border-radius: 12px;
+    background: color-mix(in srgb, var(--ok) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--ok) 30%, transparent); font-size: 13px; }
+
+  /* Toast */
+  #toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(14px);
+    max-width: 620px; padding: 12px 20px; border-radius: 12px; background: var(--ink);
+    color: var(--bg); font-size: 14px; font-weight: 500; opacity: 0; box-shadow: var(--shadow-lg);
+    transition: opacity .22s, transform .22s; pointer-events: none; z-index: 60; }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  #toast.err { background: var(--err); color: #fff; }
+</style>
+</head>
+<body>
+
+<!-- ===== Lock / setup ===== -->
+<div id="lock" class="lockwrap hidden">
+  <div class="lockcard">
+    <div class="logo">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 12a8 8 0 0 1 13.7-5.6L20 8"/><path d="M20 4v4h-4"/>
+        <path d="M20 12a8 8 0 0 1-13.7 5.6L4 16"/><path d="M4 20v-4h4"/>
+      </svg>
+    </div>
+    <div id="setupBox" class="hidden">
+      <h1>Set up ccsync</h1>
+      <p class="note">Create an empty git repository first. A <b>private</b> repo is recommended —
+        everything is encrypted with your passphrase, but a public repo still shows that you sync and when.
+        Your existing git auth (SSH key / credential helper) is used; ccsync never stores credentials.</p>
+      <label>Git repository URL</label>
+      <input id="repoUrl" type="text" placeholder="git@github.com:you/session-store.git" autocomplete="off">
+      <label>Store passphrase</label>
+      <input id="setupPass" type="password" autocomplete="new-password">
+      <label>Confirm passphrase</label>
+      <input id="setupPass2" type="password" autocomplete="new-password">
+      <div class="dlg-foot" style="padding:18px 0 0">
+        <button class="btn" id="setupGo" onclick="doSetup()">Set up</button>
+        <span id="setupSpin" class="spin hidden"></span>
+      </div>
+    </div>
+    <div id="unlockBox" class="hidden">
+      <h1>Unlock your store</h1>
+      <p class="note">Connected to <span id="lockRepo" class="mono"></span></p>
+      <label>Store passphrase</label>
+      <input id="unlockPass" type="password" onkeydown="if(event.key==='Enter')doUnlock()">
+      <div class="dlg-foot" style="padding:18px 0 0">
+        <button class="btn" id="unlockGo" onclick="doUnlock()">Unlock</button>
+        <span id="unlockSpin" class="spin hidden"></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Main ===== -->
+<div id="main" class="hidden">
+  <div class="appbar">
+    <div class="brand">
+      <div class="logo">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 12a8 8 0 0 1 13.7-5.6L20 8"/><path d="M20 4v4h-4"/>
+          <path d="M20 12a8 8 0 0 1-13.7 5.6L4 16"/><path d="M4 20v-4h4"/>
+        </svg>
+      </div>
+      <div><b>ccsync</b><span>Claude Code sessions</span></div>
+    </div>
+    <div class="spacer"></div>
+    <div class="chip"><span class="dot"></span><span class="repo mono" id="storeRepo"></span></div>
+  </div>
+
+  <div class="wrap">
+    <div class="grid">
+      <!-- This machine -->
+      <div class="card">
+        <div class="card-head">
+          <div class="titlerow">
+            <h2>This machine <span class="count" id="localCount"></span></h2>
+          </div>
+          <select id="projectSel" onchange="loadLocal()"></select>
+          <div class="search">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+            <input id="localSearch" type="text" placeholder="Search sessions…" oninput="renderLocal()">
+          </div>
+          <div class="toolbar">
+            <label class="selall"><input type="checkbox" id="pickAll" onchange="toggleAll(this)"> Select all</label>
+            <span class="grow"></span>
+            <button class="btn" id="pushBtn" onclick="doPush()" disabled>Push selected</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div id="localList" class="rows"></div>
+        </div>
+      </div>
+
+      <!-- In the store -->
+      <div class="card">
+        <div class="card-head">
+          <div class="titlerow">
+            <h2>In the store <span class="count" id="storeCount"></span></h2>
+            <span class="grow" style="flex:1"></span>
+            <button class="btn ghost sm" id="refreshBtn" onclick="loadStore()">
+              <span id="refreshSpin" class="spin hidden"></span><span id="refreshLbl">Refresh</span>
+            </button>
+          </div>
+          <div class="search">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+            <input id="storeSearch" type="text" placeholder="Search store…" oninput="renderStore()">
+          </div>
+          <p class="note">Sessions backed up in your encrypted repo. Pull one to another location to resume it there.</p>
+        </div>
+        <div class="card-body">
+          <div id="storeList" class="rows"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Push confirm dialog ===== -->
+<dialog id="pushDlg">
+  <div class="dlg-head"><h2>Push these sessions?</h2>
+    <p class="note" id="pushDlgSub" style="margin-top:6px"></p></div>
+  <div class="dlg-body"><ul id="pushList" class="pushlist"></ul></div>
+  <div class="dlg-foot">
+    <button class="btn" id="pushGo" onclick="confirmPush()">
+      <span id="pushSpin" class="spin hidden"></span><span id="pushGoLbl">Push</span>
+    </button>
+    <button class="btn ghost" onclick="pushDlg.close()">Cancel</button>
+    <span class="grow" style="flex:1"></span>
+    <span id="pushStatus" class="note"></span>
+  </div>
+</dialog>
+
+<!-- ===== Pull dialog ===== -->
+<dialog id="pullDlg">
+  <div class="dlg-head"><h2>Pull session</h2>
+    <p class="note mono" id="pullId" style="margin-top:6px"></p></div>
+  <div class="dlg-body">
+    <label>Install for project directory <span class="muted">(Claude Code creates it if missing)</span></label>
+    <input id="pullDest" type="text" class="mono">
+    <label class="selall" style="margin-top:12px">
+      <input type="checkbox" id="pullForce"> overwrite if it already exists locally</label>
+    <div id="pullDone" class="donebox hidden"></div>
+  </div>
+  <div class="dlg-foot">
+    <button class="btn" id="pullGo" onclick="doPull()">
+      <span id="pullSpin" class="spin hidden"></span><span id="pullGoLbl">Pull</span>
+    </button>
+    <button class="btn ghost" onclick="pullDlg.close()">Close</button>
+  </div>
+</dialog>
+
+<div id="toast"></div>
+
+<script>
+const token = new URLSearchParams(location.search).get('t') || '';
+let state = null, pullTarget = null, localRows = [], storeMetas = [], projectsBySlug = {};
+
+async function api(path, body) {
+  const opts = { headers: { 'X-CCSync-Token': token } };
+  if (body !== undefined) {
+    opts.method = 'POST';
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(path, opts);
+  const j = await res.json().catch(() => ({ ok: false, error: 'bad response' }));
+  if (!j.ok) throw new Error(j.error || res.statusText);
+  return j.data;
+}
+
+function toast(msg, isErr) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'show' + (isErr ? ' err' : '');
+  clearTimeout(t._h);
+  t._h = setTimeout(() => t.className = '', isErr ? 6000 : 3500);
+}
+function busy(btnId, spinId, on, lblId, busyText, idleText) {
+  document.getElementById(spinId).classList.toggle('hidden', !on);
+  document.getElementById(btnId).disabled = on;
+  if (lblId) document.getElementById(lblId).textContent = on ? busyText : idleText;
+}
+
+const esc = s => (s || '').replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const when = iso => iso ? new Date(iso).toLocaleString(undefined,
+  { dateStyle: 'medium', timeStyle: 'short' }) : '';
+const size = n => n >= 1<<20 ? (n/(1<<20)).toFixed(1)+' MB'
+  : n >= 1024 ? (n/1024).toFixed(1)+' KB' : n+' B';
+const short = id => (id || '').slice(0, 8);
+
+async function boot() {
+  try { state = await api('/api/state'); }
+  catch (e) { toast(e.message, true); return; }
+  if (!state.configured) {
+    document.getElementById('lock').classList.remove('hidden');
+    document.getElementById('setupBox').classList.remove('hidden');
+  } else if (!state.unlocked) {
+    document.getElementById('lock').classList.remove('hidden');
+    document.getElementById('unlockBox').classList.remove('hidden');
+    document.getElementById('lockRepo').textContent = state.repoUrl || '';
+    document.getElementById('unlockPass').focus();
+  } else {
+    openMain();
+  }
+}
+
+async function doSetup() {
+  const url = document.getElementById('repoUrl').value.trim();
+  const p1 = document.getElementById('setupPass').value;
+  const p2 = document.getElementById('setupPass2').value;
+  if (!url || !p1) return toast('repo URL and passphrase are required', true);
+  if (p1 !== p2) return toast('passphrases do not match', true);
+  busy('setupGo', 'setupSpin', true);
+  try {
+    await api('/api/setup', { repoUrl: url, passphrase: p1 });
+    state = await api('/api/state');
+    document.getElementById('lock').classList.add('hidden');
+    document.getElementById('setupBox').classList.add('hidden');
+    openMain();
+  } catch (e) { toast(e.message, true); }
+  busy('setupGo', 'setupSpin', false);
+}
+
+async function doUnlock() {
+  busy('unlockGo', 'unlockSpin', true);
+  try {
+    await api('/api/unlock', { passphrase: document.getElementById('unlockPass').value });
+    state = await api('/api/state');
+    document.getElementById('lock').classList.add('hidden');
+    document.getElementById('unlockBox').classList.add('hidden');
+    openMain();
+  } catch (e) { toast(e.message, true); }
+  busy('unlockGo', 'unlockSpin', false);
+}
+
+function openMain() {
+  document.getElementById('main').classList.remove('hidden');
+  document.getElementById('storeRepo').textContent = state.repoUrl || '';
+  loadProjects().then(loadLocal);
+  loadStore();
+}
+
+async function loadProjects() {
+  const sel = document.getElementById('projectSel');
+  try {
+    const projects = (await api('/api/projects'))
+      .sort((a, b) => new Date(b.LastUsed) - new Date(a.LastUsed));
+    projectsBySlug = Object.fromEntries(projects.map(p => [p.Slug, p]));
+    sel.innerHTML = projects.map(p =>
+      `<option value="${esc(p.Slug)}">${esc(p.Path || p.Slug)}  ·  ${p.Sessions} session(s)</option>`).join('');
+  } catch (e) { toast(e.message, true); }
+}
+
+const selected = new Set();           // session ids ticked for push (survives filtering & search)
+
+async function loadLocal() {
+  const slug = document.getElementById('projectSel').value;
+  if (!slug) { localRows = []; renderLocal(); return; }
+  try {
+    localRows = (await api('/api/local?slug=' + encodeURIComponent(slug)))
+      .sort((a, b) => new Date(b.Mtime) - new Date(a.Mtime));
+    // Drop selections that no longer exist in this project.
+    const ids = new Set(localRows.map(s => s.ID));
+    [...selected].forEach(id => { if (!ids.has(id)) selected.delete(id); });
+    document.getElementById('localCount').textContent = localRows.length ? `· ${localRows.length}` : '';
+    renderLocal();
+  } catch (e) { toast(e.message, true); }
+}
+
+function localVisible() {
+  const q = document.getElementById('localSearch').value.trim().toLowerCase();
+  if (!q) return localRows;
+  return localRows.filter(s =>
+    (s.Title || '').toLowerCase().includes(q) || s.ID.toLowerCase().includes(q));
+}
+
+function renderLocal() {
+  const list = document.getElementById('localList');
+  const rows = localVisible();
+  if (!localRows.length) {
+    list.innerHTML = '<div class="empty">No sessions for this project.</div>';
+  } else if (!rows.length) {
+    list.innerHTML = '<div class="empty">No sessions match your search.</div>';
+  } else {
+    list.innerHTML = rows.map(s => `
+      <div class="row pickrow${selected.has(s.ID) ? ' on' : ''}" data-id="${esc(s.ID)}" ${s.Active ? 'data-active="1"' : ''}>
+        <div class="box"></div>
+        <div class="main">
+          <div class="ttl"><span class="name">${esc(s.Title) || '<span class="muted">(untitled)</span>'}</span>
+            ${s.Active ? '<span class="badge active">active</span>' : ''}</div>
+          <div class="sub mono">${esc(short(s.ID))}</div>
+        </div>
+        <div class="side"><div class="t">${when(s.Mtime)}</div><div class="s">${size(s.Size)}</div></div>
+      </div>`).join('');
+    list.querySelectorAll('.pickrow').forEach(r => r.addEventListener('click', () => {
+      const id = r.dataset.id;
+      if (selected.has(id)) selected.delete(id); else selected.add(id);
+      r.classList.toggle('on', selected.has(id));
+      syncSelUI();
+    }));
+  }
+  syncSelUI();
+}
+
+function syncSelUI() {
+  const n = selected.size;
+  const btn = document.getElementById('pushBtn');
+  btn.disabled = n === 0;
+  btn.textContent = n ? `Push selected (${n})` : 'Push selected';
+  const vis = localVisible();
+  const all = document.getElementById('pickAll');
+  all.checked = vis.length > 0 && vis.every(s => selected.has(s.ID));
+}
+// legacy name kept for any external callers
+function syncPushBtn() { syncSelUI(); }
+
+function toggleAll(box) {
+  localVisible().forEach(s => { if (box.checked) selected.add(s.ID); else selected.delete(s.ID); });
+  renderLocal();
+}
+
+function doPush() {
+  if (!selected.size) return;
+  const chosen = localRows.filter(s => selected.has(s.ID));
+  const active = chosen.filter(s => s.Active).length;
+  document.getElementById('pushList').innerHTML = chosen.map(s =>
+    `<li><div class="ttl"><span class="name">${esc(s.Title) || '<span class="muted">(untitled)</span>'}</span>
+      ${s.Active ? '<span class="badge active">active</span>' : ''}</div>
+      <div class="mono">${esc(short(s.ID))}${s.Size ? ' · ' + size(s.Size) : ''}</div></li>`).join('');
+  document.getElementById('pushDlgSub').textContent =
+    `${chosen.length} session(s) will be encrypted and pushed to your store` +
+    (active ? ` — ${active} look active and will be forced.` : '.');
+  document.getElementById('pushStatus').textContent = '';
+  busy('pushGo', 'pushSpin', false, 'pushGoLbl', 'Pushing…', 'Push');
+  document.getElementById('pushDlg').showModal();
+}
+
+async function confirmPush() {
+  const chosen = localRows.filter(s => selected.has(s.ID));
+  const force = chosen.some(s => s.Active);
+  busy('pushGo', 'pushSpin', true, 'pushGoLbl', 'Pushing…', 'Push');
+  document.getElementById('pushStatus').textContent = 'Encrypting & pushing…';
+  try {
+    const slug = document.getElementById('projectSel').value;
+    const r = await api('/api/push', {
+      slug, project: (projectsBySlug[slug] || {}).Path || '',
+      ids: chosen.map(s => s.ID), force,
+    });
+    document.getElementById('pushDlg').close();
+    selected.clear();
+    toast(`Pushed ${r.pushed} session(s)` + (r.skipped ? `, ${r.skipped} already up to date` : ''));
+    loadStore();
+  } catch (e) {
+    document.getElementById('pushStatus').textContent = '';
+    toast(e.message, true);
+  }
+  busy('pushGo', 'pushSpin', false, 'pushGoLbl', 'Pushing…', 'Push');
+  loadLocal();
+}
+
+async function loadStore() {
+  busy('refreshBtn', 'refreshSpin', true, 'refreshLbl', 'Refreshing…', 'Refresh');
+  try {
+    storeMetas = (await api('/api/store'))
+      .sort((a, b) => new Date(b.session_mtime) - new Date(a.session_mtime));
+    document.getElementById('storeCount').textContent = storeMetas.length ? `· ${storeMetas.length}` : '';
+    renderStore();
+  } catch (e) { toast(e.message, true); }
+  busy('refreshBtn', 'refreshSpin', false, 'refreshLbl', 'Refreshing…', 'Refresh');
+}
+
+function storeVisible() {
+  const q = document.getElementById('storeSearch').value.trim().toLowerCase();
+  if (!q) return storeMetas;
+  return storeMetas.filter(m =>
+    (m.title || '').toLowerCase().includes(q) ||
+    (m.project_label || '').toLowerCase().includes(q) ||
+    (m.hostname || '').toLowerCase().includes(q) ||
+    (m.session_id || '').toLowerCase().includes(q));
+}
+
+function renderStore() {
+  const list = document.getElementById('storeList');
+  const metas = storeVisible();
+  if (!storeMetas.length) {
+    list.innerHTML = '<div class="empty">Nothing here yet. Select sessions on the left and push.</div>';
+    return;
+  }
+  if (!metas.length) {
+    list.innerHTML = '<div class="empty">No sessions match your search.</div>';
+    return;
+  }
+  list.innerHTML = metas.map(m => `
+    <div class="row store" data-id="${esc(m.session_id)}">
+      <div class="main">
+        <div class="ttl"><span class="name">${esc(m.title) || '<span class="muted">(untitled)</span>'}</span></div>
+        <div class="sub"><span class="mono">${esc(short(m.session_id))}</span>
+          · ${esc(m.project_label || '')} · from ${esc(m.hostname || '?')}</div>
+      </div>
+      <div class="side"><div class="t">${when(m.session_mtime)}</div><div class="s">${size(m.size)}</div></div>
+      <button class="btn ghost sm">Pull</button>
+    </div>`).join('');
+  list.querySelectorAll('.row.store').forEach(row => {
+    const m = storeMetas.find(x => x.session_id === row.dataset.id);
+    row.querySelector('button').addEventListener('click', () => openPull(m));
+  });
+}
+
+function openPull(m) {
+  pullTarget = m.session_id;
+  document.getElementById('pullId').textContent = m.session_id;
+  document.getElementById('pullDest').value = m.original_cwd || '';
+  document.getElementById('pullForce').checked = false;
+  document.getElementById('pullDone').classList.add('hidden');
+  busy('pullGo', 'pullSpin', false, 'pullGoLbl', 'Pulling…', 'Pull');
+  document.getElementById('pullDlg').showModal();
+}
+
+async function doPull() {
+  const dest = document.getElementById('pullDest').value.trim();
+  if (!dest) return toast('destination directory is required', true);
+  busy('pullGo', 'pullSpin', true, 'pullGoLbl', 'Pulling…', 'Pull');
+  try {
+    const r = await api('/api/pull', {
+      id: pullTarget, dest, force: document.getElementById('pullForce').checked,
+    });
+    const done = document.getElementById('pullDone');
+    done.innerHTML = 'Installed. Resume with:<br><code class="copy" title="click to copy" ' +
+      `onclick="navigator.clipboard.writeText(this.textContent);toast('Copied')">${esc(r.resume)}</code>`;
+    done.classList.remove('hidden');
+    toast('Session installed');
+  } catch (e) { toast(e.message, true); }
+  busy('pullGo', 'pullSpin', false, 'pullGoLbl', 'Pulling…', 'Pull');
+}
+
+boot();
+</script>
+</body>
+</html>

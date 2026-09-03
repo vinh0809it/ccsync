@@ -1,0 +1,7 @@
+# Shim for distros that ship only webkit2gtk-4.1 (e.g. recent Fedora):
+# webview_go asks pkg-config for webkit2gtk-4.0; the 4.1 API is compatible.
+# Used via: PKG_CONFIG_PATH=build/pkgconfig go build -tags desktop
+Name: webkit2gtk-4.0
+Description: shim redirecting to webkit2gtk-4.1
+Version: 4.1
+Requires: webkit2gtk-4.1
