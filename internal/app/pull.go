@@ -31,19 +31,22 @@ func (c *Client) Pull(idPrefix, dest string, force bool) (PullResult, error) {
 	if err != nil {
 		return PullResult{}, err
 	}
-	payload, err := c.store.Payload(c.key, meta.SessionID)
+	payload, err := c.store.OpenPayload(c.key, meta.SessionID)
 	if err != nil {
 		return PullResult{}, err
 	}
 	contents, err := session.Unpack(payload)
+	payload.Close()
 	if err != nil {
 		return PullResult{}, fmt.Errorf("session %s: %w", meta.SessionID, err)
 	}
 	res, err := session.Install(meta.SessionID, contents,
-		session.Origin{Cwd: meta.OriginalCwd, SessionDir: meta.SessionDir}, destAbs, force)
+		session.Origin{Cwd: meta.OriginalCwd, SessionDir: meta.SessionDir, Mtime: meta.SessionMtime}, destAbs, force)
 	switch {
 	case errors.Is(err, session.ErrLocalAhead):
 		return PullResult{}, fmt.Errorf("the local copy of %s has messages the store copy lacks — push it instead, or pull with force to replace it (the local copy is kept as a .bak file)", meta.SessionID)
+	case errors.Is(err, session.ErrUnknown):
+		return PullResult{}, fmt.Errorf("the local copy of %s and the store copy can't be compared (unrecognized transcript format) — pull with force to take the store copy (the local copy is kept as a .bak file)", meta.SessionID)
 	case errors.Is(err, session.ErrDiverged):
 		return PullResult{}, fmt.Errorf("%s was continued both here and on %s (pushed %s) — pull with force to take the store copy (the local copy is kept as a .bak file), or push with force to keep yours",
 			meta.SessionID, meta.Hostname, meta.PushedAt.Local().Format("2006-01-02 15:04"))

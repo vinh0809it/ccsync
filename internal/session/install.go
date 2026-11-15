@@ -12,8 +12,9 @@ import (
 
 // Origin is where a session lived on the machine that pushed it.
 type Origin struct {
-	Cwd        string // project path
-	SessionDir string // companion directory path
+	Cwd        string    // project path
+	SessionDir string    // companion directory path
+	Mtime      time.Time // last activity; kept so session lists sort as on the origin
 }
 
 var (
@@ -21,6 +22,8 @@ var (
 	ErrLocalAhead = errors.New("the local copy is newer")
 	// ErrDiverged means the local and incoming copies were both continued.
 	ErrDiverged = errors.New("the local and incoming copies have diverged")
+	// ErrUnknown means the copies can't be compared (no recognizable entries).
+	ErrUnknown = errors.New("the local and incoming copies can't be compared")
 )
 
 // InstallResult reports what Install did.
@@ -35,9 +38,9 @@ type InstallResult struct {
 // fields and companion-directory references to the new location.
 //
 // An existing local transcript is replaced only when that loses nothing:
-// when the incoming copy has all of its entries (see Compare). If the local
-// copy is newer or has diverged, Install returns ErrLocalAhead or
-// ErrDiverged — unless force is set, in which case the local copy is kept
+// when the incoming copy has all of its entries and more (see Compare). If
+// the local copy is newer, has diverged, or can't be compared, Install
+// returns ErrLocalAhead, ErrDiverged or ErrUnknown — unless force is set, in which case the local copy is kept
 // next to it as <id>.jsonl.bak-<unix time>. Each file is written
 // atomically, the transcript last.
 func Install(id string, c *Contents, from Origin, destPath string, force bool) (InstallResult, error) {
@@ -69,10 +72,14 @@ func Install(id string, c *Contents, from Origin, destPath string, force bool) (
 		res.Unchanged = true
 	default:
 		switch rel := Compare(transcript, existing); {
-		case rel == Same || rel == Ahead:
+		case rel == Same:
+			res.Unchanged = true // differs only in paths or bookkeeping
+		case rel == Ahead:
 			res.Updated = true
 		case !force && rel == Behind:
 			return res, ErrLocalAhead
+		case !force && rel == Unknown:
+			return res, ErrUnknown
 		case !force:
 			return res, ErrDiverged
 		default:
@@ -101,6 +108,11 @@ func Install(id string, c *Contents, from Origin, destPath string, force bool) (
 	if !res.Unchanged {
 		if err := writeAtomic(res.Target, transcript); err != nil {
 			return res, err
+		}
+		if !from.Mtime.IsZero() {
+			if err := os.Chtimes(res.Target, from.Mtime, from.Mtime); err != nil {
+				return res, err
+			}
 		}
 	}
 	return res, nil

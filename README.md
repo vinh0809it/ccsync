@@ -102,16 +102,19 @@ them.
 ## Push, pull and conflicts
 
 ccsync decides like git does with fast-forwards. Claude Code gives every
-message a unique id and only ever appends, so of two copies of a session,
-the newer one contains all the messages of the older one — whatever path it
-was relocated to. ccsync compares those message ids:
+message a unique id and only ever appends (also when compacting), so of two
+copies of a session, the newer one contains all the messages of the older
+one — whatever path it was relocated to. ccsync compares those message ids,
+and counts a rename (`/rename`, or a title set in claude-sessions) as an entry
+too:
 
 | Your copy vs. the other | `push` | `pull` |
 |---|---|---|
-| identical | nothing to do | nothing to do |
+| same messages (paths may differ) | nothing to do | nothing to do |
 | older (the other has more) | **rejected** — pull instead | updates your copy |
 | newer (you have more) | replaces the store copy | **rejected** — push instead |
 | diverged (both continued) | **rejected** | **rejected** |
+| can't be compared (no message ids found) | **rejected** | **rejected** |
 
 Rejected cases need `--force` (in the GUI, a confirmation):
 
@@ -126,7 +129,9 @@ do is merge two diverged copies into one: a conversation is a single thread,
 so you keep one side (the other is in the backup or the git history).
 
 Several machines pushing at the same moment is handled: the push that loses
-the race re-syncs and retries automatically.
+the race re-syncs and retries automatically. A pulled session keeps its
+original modification time, so session lists (and claude-sessions) sort it
+where it was, not as "just now".
 
 Not synced: `/rewind` checkpoints (`~/.claude/file-history/<session-id>/`,
 backups of files the session edited, tied to the original machine's paths)
@@ -188,6 +193,10 @@ entries it can't read; running `ccsync migrate` again converts them.
 - The git history keeps every pushed version, including sessions removed
   with `ccsync rm`. To reclaim space (or truly erase), start a new store repo
   and push again.
+- Big sessions are fine for the store (blobs are split into 45 MB files, under
+  every git host's limit) but each push of one adds its full compressed size
+  to the repo's history, and pushing or pulling it needs about 3–4× its size
+  in memory (a 512 MB transcript: ~1.7 GB).
 - For project paths over 200 characters Claude Code adds a hash to the folder
   name that ccsync can't reproduce: start one Claude Code session in the
   destination first, then pull.
@@ -198,7 +207,8 @@ entries it can't read; running `ccsync migrate` again converts them.
 ccsync.json                      plaintext marker {"format": 2}
 check.age                        known value, passphrase-encrypted (compatibility)
 key.age                          store key, passphrase-encrypted
-sessions/<uuid>/data.age         encrypted bundle (transcript + companion dir)
+sessions/<uuid>/data.age         encrypted bundle (transcript + companion dir);
+                                 past 45 MB continued in data.age.1, data.age.2, ...
 sessions/<uuid>/meta.age         encrypted metadata (title, original cwd, host, ...)
 ```
 

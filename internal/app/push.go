@@ -29,15 +29,16 @@ type PushOptions struct {
 // PushResult reports what Push did.
 type PushResult struct {
 	Pushed   []store.Meta
-	Skipped  []string    // ids already in the store with identical content
-	Rejected []Rejection // not pushed: it would lose messages from the store copy
+	Skipped  []string          // ids whose store copy already has the same entries
+	Rejected []Rejection       // not pushed: it would lose messages from the store copy
+	Active   []session.Session // not pushed: modified within ActiveGrace
 }
 
 // Rejection is a session Push refused to overwrite in the store.
 type Rejection struct {
 	Local    session.Session
 	Store    store.Meta       // the store copy
-	Relation session.Relation // of the local copy to the store copy: Behind or Diverged
+	Relation session.Relation // of the local copy to the store copy: Behind, Diverged or Unknown
 }
 
 type pushItem struct {
@@ -53,28 +54,29 @@ const batchBytes = 64 << 20
 
 // Push bundles the given local sessions into the store and publishes them,
 // like a fast-forward git push: a store copy is replaced only if the local
-// copy has all of its messages. Sessions whose store copy is newer or has
-// diverged are reported in Rejected unless opts.Overwrite is set; identical
-// ones are skipped. fallbackCwd is used when a transcript records no cwd.
+// copy has all of its entries and more. Sessions whose store copy is newer,
+// diverged or not comparable are reported in Rejected unless
+// opts.Overwrite is set; up-to-date ones in Skipped; live ones (modified
+// within ActiveGrace) in Active unless opts.IncludeActive is set.
+// fallbackCwd is used when a transcript records no cwd.
 func (c *Client) Push(sessions []session.Session, fallbackCwd string, opts PushOptions) (PushResult, error) {
 	if len(sessions) == 0 {
 		return PushResult{}, fmt.Errorf("nothing to push")
 	}
-	// Re-read every session first: the caller's listing may predate new
-	// activity, and an active session must stop the push before anything
-	// is published.
+	// Re-read every session: the caller's listing may predate new activity.
+	var total PushResult
 	fresh := make([]session.Session, 0, len(sessions))
 	for _, s := range sessions {
 		s, err := session.Load(s.File)
 		if err != nil && s.Mtime.IsZero() {
 			return PushResult{}, err // unreadable; a parse problem alone still pushes
 		}
-		if age := time.Since(s.Mtime); age < ActiveGrace && !opts.IncludeActive {
-			return PushResult{}, fmt.Errorf("session %s looks active (modified %s ago) — close it or include active sessions", s.ID, age.Round(time.Second))
+		if time.Since(s.Mtime) < ActiveGrace && !opts.IncludeActive {
+			total.Active = append(total.Active, s)
+			continue
 		}
 		fresh = append(fresh, s)
 	}
-	var total PushResult
 	for _, batch := range batches(fresh, batchBytes) {
 		items, err := bundleAll(batch, fallbackCwd)
 		if err != nil {
@@ -129,12 +131,18 @@ func (c *Client) pushBatch(items []pushItem, opts PushOptions) (PushResult, erro
 					res.Skipped = append(res.Skipped, it.meta.SessionID)
 					continue
 				}
-				if found && !opts.Overwrite {
+				if found {
+					// Same entries: the copies differ only in relocated
+					// paths or bookkeeping, e.g. a session pulled to another
+					// path and not continued.
 					rel, err := c.relationToStore(it, existing)
-					if err != nil {
+					switch {
+					case err != nil:
 						return 0, err
-					}
-					if rel == session.Behind || rel == session.Diverged {
+					case rel == session.Same:
+						res.Skipped = append(res.Skipped, it.meta.SessionID)
+						continue
+					case rel != session.Ahead && !opts.Overwrite:
 						res.Rejected = append(res.Rejected, Rejection{Local: it.session, Store: existing, Relation: rel})
 						continue
 					}
@@ -155,10 +163,11 @@ func (c *Client) pushBatch(items []pushItem, opts PushOptions) (PushResult, erro
 
 // relationToStore compares a local session with its store copy.
 func (c *Client) relationToStore(it pushItem, existing store.Meta) (session.Relation, error) {
-	payload, err := c.store.Payload(c.key, existing.SessionID)
+	payload, err := c.store.OpenPayload(c.key, existing.SessionID)
 	if err != nil {
 		return 0, err
 	}
+	defer payload.Close()
 	stored, err := session.Unpack(payload)
 	if err != nil {
 		return 0, fmt.Errorf("session %s: %w", existing.SessionID, err)

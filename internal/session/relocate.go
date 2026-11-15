@@ -26,9 +26,13 @@ func RewriteCwd(data []byte, oldCwd, newCwd string) []byte {
 	}
 	oldP := []byte(`"cwd":"` + jsonString(oldCwd))
 	newP := []byte(`"cwd":"` + jsonString(newCwd))
+	if !bytes.Contains(data, oldP) {
+		return data // no copy of a large transcript for nothing
+	}
 	// One pass, so a destination inside the old path is never rewritten
 	// twice.
 	var out bytes.Buffer
+	out.Grow(len(data) + len(data)/64)
 	for {
 		i := bytes.Index(data, oldP)
 		if i < 0 {
@@ -54,5 +58,9 @@ func RewritePath(data []byte, oldPath, newPath string) []byte {
 	if oldPath == "" || oldPath == newPath {
 		return data
 	}
-	return bytes.ReplaceAll(data, []byte(jsonString(oldPath)), []byte(jsonString(newPath)))
+	old := []byte(jsonString(oldPath))
+	if !bytes.Contains(data, old) {
+		return data
+	}
+	return bytes.ReplaceAll(data, old, []byte(jsonString(newPath)))
 }

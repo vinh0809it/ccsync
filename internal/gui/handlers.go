@@ -170,14 +170,14 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 	type rejection struct {
 		ID       string `json:"id"`
 		Title    string `json:"title"`
-		Relation string `json:"relation"` // "behind" or "diverged"
+		Relation string `json:"relation"` // "behind", "diverged" or "unknown"
 		Host     string `json:"host"`
 	}
 	rejected := make([]rejection, 0, len(res.Rejected))
 	for _, r := range res.Rejected {
 		rejected = append(rejected, rejection{r.Local.ID, r.Local.Title, r.Relation.String(), r.Store.Hostname})
 	}
-	ok(w, map[string]any{"pushed": len(res.Pushed), "skipped": len(res.Skipped), "rejected": rejected})
+	ok(w, map[string]any{"pushed": len(res.Pushed), "skipped": len(res.Skipped), "rejected": rejected, "active": len(res.Active)})
 }
 
 func (s *Server) handlePull(w http.ResponseWriter, r *http.Request) {

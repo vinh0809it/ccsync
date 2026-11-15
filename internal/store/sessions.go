@@ -2,8 +2,11 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/vinh-vh/ccsync/internal/crypto"
@@ -28,10 +31,6 @@ func (s *Store) Put(key *crypto.Key, meta Meta, payload []byte) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	dataBlob, err := key.Encrypt(payload)
-	if err != nil {
-		return err
-	}
 	metaJSON, err := json.Marshal(meta)
 	if err != nil {
 		return err
@@ -40,10 +39,90 @@ func (s *Store) Put(key *crypto.Key, meta Meta, payload []byte) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(s.path(sessionsDir, meta.SessionID, "data.age"), dataBlob, 0o644); err != nil {
+	if err := s.writeData(meta.SessionID, func(w io.Writer) error { return key.EncryptTo(w, payload) }); err != nil {
 		return err
 	}
 	return os.WriteFile(s.path(sessionsDir, meta.SessionID, "meta.age"), metaBlob, 0o644)
+}
+
+// partSize bounds each file of a session's encrypted bundle. Git hosts
+// refuse large files (GitHub: 100 MB hard limit, warning at 50 MB), so a
+// big bundle is stored as data.age, data.age.1, data.age.2, ...
+const partSize = 45 << 20
+
+func partName(i int) string {
+	if i == 0 {
+		return "data.age"
+	}
+	return fmt.Sprintf("data.age.%d", i)
+}
+
+// writeData stores a session's encrypted bundle, streamed by write, in
+// parts of at most partSize, removing stale parts of an earlier version.
+func (s *Store) writeData(id string, write func(io.Writer) error) error {
+	stale, err := filepath.Glob(s.path(sessionsDir, id, "data.age.*"))
+	if err != nil {
+		return err
+	}
+	for _, p := range stale {
+		if err := os.Remove(p); err != nil {
+			return err
+		}
+	}
+	pw := &partWriter{dir: s.path(sessionsDir, id)}
+	return errors.Join(write(pw), pw.Close())
+}
+
+// partWriter writes a stream as data.age, data.age.1, ... of at most
+// partSize bytes each.
+type partWriter struct {
+	dir  string
+	n    int      // index of the open part
+	f    *os.File // open part, nil before the first write
+	size int      // bytes in the open part
+}
+
+func (p *partWriter) Write(b []byte) (int, error) {
+	written := 0
+	for len(b) > 0 {
+		if p.f == nil || p.size == partSize {
+			if err := p.next(); err != nil {
+				return written, err
+			}
+		}
+		n, err := p.f.Write(b[:min(len(b), partSize-p.size)])
+		written += n
+		p.size += n
+		if err != nil {
+			return written, err
+		}
+		b = b[n:]
+	}
+	return written, nil
+}
+
+// next closes the open part and starts the following one.
+func (p *partWriter) next() error {
+	if p.f != nil {
+		if err := p.f.Close(); err != nil {
+			return err
+		}
+		p.n++
+	}
+	f, err := os.OpenFile(filepath.Join(p.dir, partName(p.n)), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	p.f, p.size = f, 0
+	return err
+}
+
+// Close finishes the last part (creating an empty data.age if nothing was
+// written).
+func (p *partWriter) Close() error {
+	if p.f == nil {
+		if err := p.next(); err != nil {
+			return err
+		}
+	}
+	return p.f.Close()
 }
 
 // Remove deletes one session from the clone; Commit stages the deletion.
@@ -149,14 +228,43 @@ func (s *Store) Find(key *crypto.Key, idPrefix string) (Meta, error) {
 	return *match, nil
 }
 
-// Payload decrypts one session's bundle.
-func (s *Store) Payload(key *crypto.Key, id string) ([]byte, error) {
+// OpenPayload streams one session's decrypted bundle; the caller closes it.
+func (s *Store) OpenPayload(key *crypto.Key, id string) (io.ReadCloser, error) {
 	if err := checkID(id); err != nil {
 		return nil, err
 	}
-	blob, err := os.ReadFile(s.path(sessionsDir, id, "data.age"))
-	if err != nil {
-		return nil, err
+	var parts []io.Reader
+	var files []*os.File
+	closeAll := func() error {
+		var errs []error
+		for _, f := range files {
+			errs = append(errs, f.Close())
+		}
+		return errors.Join(errs...)
 	}
-	return key.Decrypt(blob)
+	for i := 0; ; i++ {
+		f, err := os.Open(s.path(sessionsDir, id, partName(i)))
+		if i > 0 && os.IsNotExist(err) {
+			break
+		}
+		if err != nil {
+			closeAll()
+			return nil, err
+		}
+		files = append(files, f)
+		parts = append(parts, f)
+	}
+	r, err := key.DecryptFrom(io.MultiReader(parts...))
+	if err != nil {
+		closeAll()
+		return nil, fmt.Errorf("session %s: %w", id, err)
+	}
+	return readCloser{r, closeAll}, nil
 }
+
+type readCloser struct {
+	io.Reader
+	close func() error
+}
+
+func (r readCloser) Close() error { return r.close() }

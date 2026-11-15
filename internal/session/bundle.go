@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -22,6 +23,10 @@ const (
 	transcriptEntry = "session.jsonl"
 	companionPrefix = "companion/"
 )
+
+// maxEntry bounds one file in a bundle. Bundles come from other machines;
+// the size is checked before allocating.
+const maxEntry = 4 << 30
 
 // Contents is an unpacked bundle.
 type Contents struct {
@@ -48,8 +53,12 @@ func ReadContents(s Session) (Contents, error) {
 // tar, which is deterministic (sorted names, fixed modes and times), so
 // unchanged contents always hash the same.
 func Pack(c Contents) (payload []byte, hash string, err error) {
-	var tarBuf bytes.Buffer
-	tw := tar.NewWriter(&tarBuf)
+	// The tar streams through the hash and gzip at once: transcripts can
+	// be hundreds of megabytes, and a full uncompressed copy isn't needed.
+	var gz bytes.Buffer
+	h := sha256.New()
+	zw := gzip.NewWriter(&gz)
+	tw := tar.NewWriter(io.MultiWriter(h, zw))
 	add := func(name string, data []byte) error {
 		hdr := &tar.Header{Name: name, Mode: 0o600, Size: int64(len(data)),
 			Typeflag: tar.TypeReg, ModTime: time.Unix(0, 0), Format: tar.FormatPAX}
@@ -72,27 +81,17 @@ func Pack(c Contents) (payload []byte, hash string, err error) {
 			return nil, "", err
 		}
 	}
-	if err := tw.Close(); err != nil {
+	if err := errors.Join(tw.Close(), zw.Close()); err != nil {
 		return nil, "", err
 	}
-	sum := sha256.Sum256(tarBuf.Bytes())
-
-	var gz bytes.Buffer
-	zw := gzip.NewWriter(&gz)
-	if _, err := zw.Write(tarBuf.Bytes()); err != nil {
-		return nil, "", err
-	}
-	if err := zw.Close(); err != nil {
-		return nil, "", err
-	}
-	return gz.Bytes(), hex.EncodeToString(sum[:]), nil
+	return gz.Bytes(), hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // Unpack validates and unpacks a bundle. Bundles come from the store, which
 // other machines write, so every name is checked before it can reach a
 // filesystem path.
-func Unpack(payload []byte) (*Contents, error) {
-	zr, err := gzip.NewReader(bytes.NewReader(payload))
+func Unpack(payload io.Reader) (*Contents, error) {
+	zr, err := gzip.NewReader(payload)
 	if err != nil {
 		return nil, fmt.Errorf("bad bundle: %w", err)
 	}
@@ -110,8 +109,13 @@ func Unpack(payload []byte) (*Contents, error) {
 		if hdr.Typeflag != tar.TypeReg {
 			return nil, fmt.Errorf("bad bundle: %q is not a regular file", hdr.Name)
 		}
-		data, err := io.ReadAll(tr)
-		if err != nil {
+		if hdr.Size < 0 || hdr.Size > maxEntry {
+			return nil, fmt.Errorf("bad bundle: %q has size %d", hdr.Name, hdr.Size)
+		}
+		// Sized up front: growing a buffer to a large transcript would
+		// briefly need twice its size.
+		data := make([]byte, hdr.Size)
+		if _, err := io.ReadFull(tr, data); err != nil {
 			return nil, fmt.Errorf("bad bundle: %w", err)
 		}
 		switch {

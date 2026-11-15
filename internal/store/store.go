@@ -6,6 +6,7 @@
 //	check.age                       known value encrypted with the passphrase
 //	key.age                         the store key, encrypted with the passphrase
 //	sessions/<session-id>/data.age  the session bundle, encrypted to the key
+//	                                (split into data.age.1, .2, ... past 45 MB)
 //	sessions/<session-id>/meta.age  Meta (JSON), encrypted to the key — a
 //	                                public repo leaks nothing but random UUIDs
 //

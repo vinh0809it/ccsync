@@ -54,16 +54,41 @@ func UnwrapKey(passphrase string, blob []byte) (*Key, error) {
 
 // Encrypt encrypts plaintext to the key.
 func (k *Key) Encrypt(plaintext []byte) ([]byte, error) {
-	return encrypt(k.id.Recipient(), plaintext)
+	var buf bytes.Buffer
+	if err := k.EncryptTo(&buf, plaintext); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// EncryptTo encrypts plaintext to the key, streaming the ciphertext to w.
+func (k *Key) EncryptTo(w io.Writer, plaintext []byte) error {
+	ew, err := age.Encrypt(w, k.id.Recipient())
+	if err != nil {
+		return err
+	}
+	if _, err := ew.Write(plaintext); err != nil {
+		return err
+	}
+	return ew.Close()
 }
 
 // Decrypt decrypts a blob encrypted to the key.
 func (k *Key) Decrypt(ciphertext []byte) ([]byte, error) {
-	r, err := age.Decrypt(bytes.NewReader(ciphertext), k.id)
+	r, err := k.DecryptFrom(bytes.NewReader(ciphertext))
+	if err != nil {
+		return nil, err
+	}
+	return io.ReadAll(r)
+}
+
+// DecryptFrom returns a reader of the plaintext of the ciphertext in r.
+func (k *Key) DecryptFrom(r io.Reader) (io.Reader, error) {
+	pr, err := age.Decrypt(r, k.id)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt failed: %w", err)
 	}
-	return io.ReadAll(r)
+	return pr, nil
 }
 
 // Encrypt encrypts plaintext with the passphrase (scrypt; slow by design).

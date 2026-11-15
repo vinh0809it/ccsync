@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,6 +37,17 @@ func open(t *testing.T, st *Store, remote string) *crypto.Key {
 		t.Fatal(err)
 	}
 	return key
+}
+
+// payload reads a session's decrypted bundle.
+func payload(t *testing.T, st *Store, key *crypto.Key, id string) ([]byte, error) {
+	t.Helper()
+	r, err := st.OpenPayload(key, id)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	return io.ReadAll(r)
 }
 
 func put(t *testing.T, st *Store, key *crypto.Key, id string, payload string) {
@@ -80,7 +92,7 @@ func TestRoundTrip(t *testing.T) {
 	if err != nil || m.SessionID != id {
 		t.Fatalf("Find = %+v %v", m, err)
 	}
-	if data, err := st.Payload(key, id); err != nil || string(data) != "transcript API_KEY=hunter2" {
+	if data, err := payload(t, st, key, id); err != nil || string(data) != "transcript API_KEY=hunter2" {
 		t.Fatalf("Payload = %q %v", data, err)
 	}
 	if _, err := st.Find(key, "99999999"); err == nil {
@@ -180,7 +192,7 @@ func TestTwoMachines(t *testing.T) {
 		t.Fatal("init with a wrong passphrase should fail")
 	}
 	keyB := open(t, b, remote)
-	if data, err := b.Payload(keyB, "55555555-aaaa-bbbb-cccc-000000000001"); err != nil || string(data) != "from A" {
+	if data, err := payload(t, b, keyB, "55555555-aaaa-bbbb-cccc-000000000001"); err != nil || string(data) != "from A" {
 		t.Fatalf("machine B read %q, %v", data, err)
 	}
 }
@@ -352,7 +364,7 @@ func TestMigrateFromFormat1(t *testing.T) {
 	if err != nil || m.Title != "old" || m.ContentHash != "h" {
 		t.Fatalf("migrated meta: %+v %v", m, err)
 	}
-	if data, _ := other.Payload(key, id); string(data) != "bundle:raw transcript" {
+	if data, _ := payload(t, other, key, id); string(data) != "bundle:raw transcript" {
 		t.Fatalf("migrated payload: %q", data)
 	}
 }
@@ -390,5 +402,35 @@ func TestMigrateEmptyFormat1Store(t *testing.T) {
 	}
 	if _, err := st.Unlock(pass); err != nil {
 		t.Fatalf("unlock after migrating an empty store: %v", err)
+	}
+}
+
+// TestLargeBundlesAreSplit: no store file may exceed what git hosts accept.
+func TestLargeBundlesAreSplit(t *testing.T) {
+	remote := testutil.Remote(t)
+	st := machine(t)
+	key := open(t, st, remote)
+	id := "13131313-aaaa-bbbb-cccc-000000000001"
+	big := strings.Repeat("x", partSize*2+123)
+	put(t, st, key, id, big)
+	parts, _ := filepath.Glob(st.path(sessionsDir, id, "data.age*"))
+	if len(parts) != 3 {
+		t.Fatalf("parts = %v, want 3", parts)
+	}
+	for _, p := range parts {
+		if info, _ := os.Stat(p); info.Size() > partSize {
+			t.Fatalf("%s is %d bytes", p, info.Size())
+		}
+	}
+	if data, err := payload(t, st, key, id); err != nil || string(data) != big {
+		t.Fatalf("reassembled payload wrong (len %d, %v)", len(data), err)
+	}
+	// Rewriting with a small bundle removes the stale parts.
+	put(t, st, key, id, "small")
+	if parts, _ := filepath.Glob(st.path(sessionsDir, id, "data.age*")); len(parts) != 1 {
+		t.Fatalf("stale parts left: %v", parts)
+	}
+	if data, _ := payload(t, st, key, id); string(data) != "small" {
+		t.Fatalf("payload after rewrite: %q", data)
 	}
 }

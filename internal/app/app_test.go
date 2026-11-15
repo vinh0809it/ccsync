@@ -54,8 +54,8 @@ func TestPushRefusesActiveUnlessForced(t *testing.T) {
 	now := time.Now()
 	os.Chtimes(s.File, now, now)
 
-	if _, err := c.Push([]session.Session{s}, "", PushOptions{}); err == nil || !strings.Contains(err.Error(), "active") {
-		t.Fatalf("push of an active session must be refused, got %v", err)
+	if res, err := c.Push([]session.Session{s}, "", PushOptions{}); err != nil || len(res.Active) != 1 || len(res.Pushed) != 0 {
+		t.Fatalf("an active session must be held back: %+v %v", res, err)
 	}
 	if res, err := c.Push([]session.Session{s}, "", PushOptions{IncludeActive: true}); err != nil || len(res.Pushed) != 1 {
 		t.Fatalf("forced push: %+v %v", res, err)
@@ -64,7 +64,7 @@ func TestPushRefusesActiveUnlessForced(t *testing.T) {
 
 func TestPushSkipsUnchangedContent(t *testing.T) {
 	m, c := machine(t, testutil.Remote(t))
-	s := localSession(t, m, "77777777-aaaa-bbbb-cccc-000000000002")
+	s := localSession(t, m, "77777777-aaaa-bbbb-cccc-000000000002", `{"type":"user","uuid":"u1"}`)
 
 	if res, err := c.Push([]session.Session{s}, "", PushOptions{}); err != nil || len(res.Pushed) != 1 {
 		t.Fatalf("first push: %+v %v", res, err)
@@ -72,7 +72,7 @@ func TestPushSkipsUnchangedContent(t *testing.T) {
 	if res, err := c.Push([]session.Session{s}, "", PushOptions{}); err != nil || len(res.Pushed) != 0 || len(res.Skipped) != 1 {
 		t.Fatalf("re-push: %+v %v", res, err)
 	}
-	testutil.WriteFile(t, s.File, testutil.CwdLine(project)+"\n"+`{"more":"data"}`+"\n")
+	appendLine(t, s.File, `{"type":"user","uuid":"u2"}`)
 	if res, err := c.Push([]session.Session{s}, "", PushOptions{}); err != nil || len(res.Pushed) != 1 {
 		t.Fatalf("push after change: %+v %v", res, err)
 	}
@@ -224,8 +224,13 @@ func TestPushIsFastForwardOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	appendLine(t, pulled.Target, `{"type":"user","uuid":"u2"}`)
+	// Pulled to another path but not continued: nothing to push.
 	sb, _ := session.Load(pulled.Target)
+	if res, err := clientB.Push([]session.Session{sb}, "", PushOptions{}); err != nil || len(res.Skipped) != 1 {
+		t.Fatalf("pushing an untouched pulled copy: %+v %v", res, err)
+	}
+	appendLine(t, pulled.Target, `{"type":"user","uuid":"u2"}`)
+	sb, _ = session.Load(pulled.Target)
 	if res, err := clientB.Push([]session.Session{sb}, "", PushOptions{}); err != nil || len(res.Pushed) != 1 {
 		t.Fatalf("B fast-forward push: %+v %v", res, err)
 	}

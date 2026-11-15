@@ -47,10 +47,16 @@
 - The GUI API accepts only the intended HTTP method per endpoint.
 
 ### Added
-- Push and pull are fast-forward only: by comparing message ids, an outdated
+- Push and pull are fast-forward only: by comparing message ids (and renames), an outdated
   copy can no longer overwrite a newer one, and a session continued on two
   machines is reported instead of silently losing one side. `--force`
   overrides (pull keeps a backup; push leaves the old copy in git history).
+- Encrypted bundles are split into 45 MB files, so sessions of any size fit
+  git hosts' file limits (GitHub refuses files over 100 MB). Bundling and
+  encryption stream, keeping memory near 3× the session size.
+- A pulled session keeps its original modification time.
+- Active sessions met during a push are skipped and reported instead of
+  aborting the whole push.
 - `ccsync push --all-projects`, and "All projects" in the GUI. Large pushes
   are split into commits of at most ~64 MB so memory stays bounded.
 - Native-window apps for Windows, macOS (.app) and Linux (with an installer),

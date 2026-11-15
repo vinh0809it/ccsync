@@ -72,7 +72,7 @@ func TestCommandsEndToEnd(t *testing.T) {
 	if out := mustRun(t, "sessions", "--project", project); !strings.Contains(out, "cli-flow") {
 		t.Fatalf("sessions: %q", out)
 	}
-	if out := mustRun(t, "push", "cccc", "--project", project); !strings.Contains(out, "pushed 1, already up to date 0, rejected 0") {
+	if out := mustRun(t, "push", "cccc", "--project", project); !strings.Contains(out, "pushed 1, already up to date 0, rejected 0, active 0") {
 		t.Fatalf("push: %q", out)
 	}
 

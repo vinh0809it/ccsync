@@ -187,7 +187,7 @@ func TestBundleRoundTripAndInstall(t *testing.T) {
 	if _, hash2, _ := Pack(contents); hash2 != hash {
 		t.Fatal("bundle hash is not deterministic")
 	}
-	c, err := Unpack(payload)
+	c, err := Unpack(bytes.NewReader(payload))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestUnpackRejectsUnsafeEntries(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Unpack(payload); err == nil {
+		if _, err := Unpack(bytes.NewReader(payload)); err == nil {
 			t.Errorf("Unpack accepted %q", rel)
 		}
 	}
@@ -268,10 +268,19 @@ func TestCompare(t *testing.T) {
 			t.Errorf("Compare(%v, %v) = %v, want %v", tc.a, tc.b, got, tc.want)
 		}
 	}
-	// Relocated paths and metadata lines don't count, only entries.
+	// Relocated paths and bookkeeping lines don't count; renames do.
 	moved := bytes.ReplaceAll(transcript("1", "2"), []byte("/p"), []byte("/elsewhere"))
-	if got := Compare(moved, append(transcript("1", "2"), testutil.TitleLine("renamed")...)); got != Same {
+	moved = append(moved, `{"type":"last-prompt","lastPrompt":"x"}`+"\n"...)
+	if got := Compare(moved, transcript("1", "2")); got != Same {
 		t.Errorf("relocated copy = %v, want same", got)
+	}
+	renamed := append(transcript("1", "2"), testutil.TitleLine("renamed")+"\n"...)
+	if got := Compare(renamed, transcript("1", "2")); got != Ahead {
+		t.Errorf("renamed copy = %v, want ahead", got)
+	}
+	// No recognizable entries: no evidence either way.
+	if got := Compare([]byte(`{"x":1}`), transcript("1")); got != Unknown {
+		t.Errorf("unrecognized copy = %v, want unknown", got)
 	}
 }
 
@@ -323,7 +332,7 @@ func TestUnpackSkipsUnknownEntries(t *testing.T) {
 	zw := gzip.NewWriter(&gz)
 	zw.Write(tarBuf.Bytes())
 	zw.Close()
-	c, err := Unpack(gz.Bytes())
+	c, err := Unpack(bytes.NewReader(gz.Bytes()))
 	if err != nil || string(c.Transcript) != "t" || len(c.Companion) != 0 {
 		t.Fatalf("Unpack = %+v, %v", c, err)
 	}

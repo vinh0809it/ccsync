@@ -109,9 +109,6 @@ func (c *cli) push(args []string) error {
 	if err != nil {
 		return err
 	}
-	if *all || *allProjects {
-		selected = c.dropActive(selected, *force)
-	}
 	if len(selected) == 0 {
 		return fmt.Errorf("nothing to push")
 	}
@@ -127,39 +124,33 @@ func (c *cli) push(args []string) error {
 	for _, r := range res.Rejected {
 		fmt.Fprintf(c.out, "rejected %s  %s — %s\n", r.Local.ID, title(r.Local.Title), rejectionReason(r))
 	}
+	for _, s := range res.Active {
+		fmt.Fprintf(c.out, "skipped  %s  %s — active in the last %s (--force to include)\n", s.ID, title(s.Title), app.ActiveGrace)
+	}
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(c.out, "pushed %d, already up to date %d, rejected %d.\n", len(res.Pushed), len(res.Skipped), len(res.Rejected))
+	fmt.Fprintf(c.out, "pushed %d, already up to date %d, rejected %d, active %d.\n",
+		len(res.Pushed), len(res.Skipped), len(res.Rejected), len(res.Active))
 	if len(res.Rejected) > 0 {
 		return fmt.Errorf("%d session(s) not pushed: pull them first, or push with --force to overwrite the store copy (it stays in the store's git history)", len(res.Rejected))
+	}
+	if len(res.Active) > 0 && fs.NArg() > 0 {
+		return fmt.Errorf("%d session(s) you named are active and were not pushed", len(res.Active))
 	}
 	return nil
 }
 
 func rejectionReason(r app.Rejection) string {
 	from := fmt.Sprintf("pushed from %s %s", r.Store.Hostname, r.Store.PushedAt.Local().Format("2006-01-02 15:04"))
-	if r.Relation == session.Behind {
+	switch r.Relation {
+	case session.Behind:
 		return "the store copy is newer (" + from + ")"
+	case session.Diverged:
+		return "it was also continued elsewhere (" + from + ")"
+	default:
+		return "the copies can't be compared (" + from + ")"
 	}
-	return "it was also continued elsewhere (" + from + ")"
-}
-
-// dropActive leaves out sessions modified within app.ActiveGrace, unless
-// include is set.
-func (c *cli) dropActive(sessions []session.Session, include bool) []session.Session {
-	if include {
-		return sessions
-	}
-	kept := sessions[:0:0]
-	for _, s := range sessions {
-		if time.Since(s.Mtime) < app.ActiveGrace {
-			fmt.Fprintf(c.err, "skipping %s (active session; --force to include)\n", s.ID)
-			continue
-		}
-		kept = append(kept, s)
-	}
-	return kept
 }
 
 // selectSessions resolves id prefixes against local sessions.

@@ -128,6 +128,7 @@
   .btn.ghost:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
   .btn.sm { padding: 6px 12px; font-size: 13px; }
   .btn.ghost.danger:not(:disabled):hover { border-color: var(--err); color: var(--err); }
+  .btn.danger-solid { background: var(--err); color: #fff; }
 
   .search { position: relative; display: flex; align-items: center; }
   .search svg { position: absolute; left: 12px; color: var(--faint); pointer-events: none; }
@@ -343,6 +344,16 @@
   </div>
 </dialog>
 
+<!-- ===== Confirm dialog (askConfirm) ===== -->
+<dialog id="askDlg">
+  <div class="dlg-head"><h2 id="askTitle"></h2></div>
+  <div class="dlg-body"><div id="askBody" class="note"></div></div>
+  <div class="dlg-foot">
+    <button class="btn" id="askOk"></button>
+    <button class="btn ghost" id="askCancel">Cancel</button>
+  </div>
+</dialog>
+
 <!-- ===== Pull dialog ===== -->
 <dialog id="pullDlg">
   <div class="dlg-head"><h2>Pull session</h2>
@@ -379,6 +390,25 @@ async function api(path, body) {
   const j = await res.json().catch(() => ({ ok: false, error: 'bad response' }));
   if (!j.ok) throw new Error(j.error || res.statusText);
   return j.data;
+}
+
+// askConfirm shows the page's own confirmation dialog (native confirm() is
+// not available in every embedded web view) and resolves to true on OK.
+// bodyHtml must already be escaped.
+function askConfirm(title, bodyHtml, okLabel, danger = false) {
+  const dlg = document.getElementById('askDlg');
+  document.getElementById('askTitle').textContent = title;
+  document.getElementById('askBody').innerHTML = bodyHtml;
+  const ok = document.getElementById('askOk');
+  ok.textContent = okLabel;
+  ok.classList.toggle('danger-solid', danger);
+  return new Promise(resolve => {
+    const done = v => { dlg.close(); resolve(v); };
+    ok.onclick = () => done(true);
+    document.getElementById('askCancel').onclick = () => done(false);
+    dlg.oncancel = () => resolve(false); // Esc
+    dlg.showModal();
+  });
 }
 
 function toast(msg, isErr) {
@@ -568,15 +598,23 @@ async function confirmPush(overwrite = false, ids = null) {
     document.getElementById('pushDlg').close();
     selected.clear();
     toast(`Pushed ${r.pushed} session(s)` + (r.skipped ? `, ${r.skipped} already up to date` : '') +
+      (r.active ? `, ${r.active} active (skipped)` : '') +
       (r.rejected.length ? `, ${r.rejected.length} not pushed` : ''), r.rejected.length > 0);
     loadStore();
     if (r.rejected.length) {
-      const lines = r.rejected.map(x => `• ${x.title || short(x.id)} — ` + (x.relation === 'behind'
-        ? `the store has a newer copy (from ${x.host})` : `it was also continued on ${x.host}`));
-      const msg = 'These sessions were not pushed, because the store copy has messages yours lacks:\n\n' +
-        lines.join('\n') + '\n\nPull them instead, or overwrite the store copy with yours? ' +
-        '(The overwritten version stays in the repo\'s git history.)';
-      if (confirm(msg)) { busy('pushGo', 'pushSpin', false, 'pushGoLbl', 'Pushing…', 'Push'); return confirmPush(true, r.rejected.map(x => x.id)); }
+      const why = {
+        behind: h => `the store has a newer copy (from ${h})`,
+        diverged: h => `it was also continued on ${h}`,
+        unknown: h => `the copies can’t be compared (store copy from ${h})`,
+      };
+      const items = r.rejected.map(x =>
+        `<li><b>${esc(x.title || short(x.id))}</b> — ${(why[x.relation] || why.unknown)(esc(x.host))}</li>`).join('');
+      busy('pushGo', 'pushSpin', false, 'pushGoLbl', 'Pushing…', 'Push');
+      const yes = await askConfirm(`${r.rejected.length} session(s) not pushed`,
+        `The store copy has messages yours lacks, so pushing would lose them:<ul class="pushlist">${items}</ul>` +
+        'Pull them instead, or overwrite the store copy with yours. The overwritten version stays in the store repo’s git history.',
+        'Overwrite store copy', true);
+      if (yes) return confirmPush(true, r.rejected.map(x => x.id));
     }
   } catch (e) {
     document.getElementById('pushStatus').textContent = '';
@@ -638,7 +676,10 @@ function renderStore() {
 
 async function doRemove(m) {
   const name = m.title || short(m.session_id);
-  if (!confirm(`Delete "${name}" from the store?\n\nLocal copies are not touched. Old versions stay in the repo's git history.`)) return;
+  const yes = await askConfirm(`Delete “${name}” from the store?`,
+    'Local copies on your machines are not touched. Old versions stay in the store repo’s git history.',
+    'Delete', true);
+  if (!yes) return;
   try {
     await api('/api/remove', { ids: [m.session_id] });
     toast('Deleted from the store');
