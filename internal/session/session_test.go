@@ -16,10 +16,10 @@ import (
 
 func TestSlugForPath(t *testing.T) {
 	cases := map[string]string{
-		"/home/vinhvh":               "-home-vinhvh",
-		"/home/user/my.app_v2":       "-home-user-my-app-v2",
-		`C:\Users\x\dev`:             "C--Users-x-dev",
-		"/data/projects/company/gci": "-data-projects-company-gci",
+		"/home/alice":            "-home-alice",
+		"/home/user/my.app_v2":   "-home-user-my-app-v2",
+		`C:\Users\x\dev`:         "C--Users-x-dev",
+		"/srv/projects/acme/api": "-srv-projects-acme-api",
 	}
 	for in, want := range cases {
 		if got := SlugForPath(in); got != want {
@@ -300,5 +300,26 @@ func TestLongProjectPath(t *testing.T) {
 	res, err := Install("33333333-aaaa-bbbb-cccc-000000000001", c, Origin{}, long, false)
 	if err != nil || filepath.Base(filepath.Dir(res.Target)) != hashed {
 		t.Fatalf("got %+v, %v; want install into %s", res, err, hashed)
+	}
+}
+
+// TestResolveProjectThroughSymlinks: Claude Code files sessions under the
+// real path, also for a destination that doesn't exist yet.
+func TestResolveProjectThroughSymlinks(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skip("symlinks unavailable:", err)
+	}
+	real, _ = filepath.EvalSymlinks(real)
+	parent, _ := filepath.EvalSymlinks(filepath.Dir(link))
+	for in, want := range map[string]string{
+		link:                                 real,
+		filepath.Join(link, "new", "proj"):   filepath.Join(real, "new", "proj"),
+		filepath.Join(link, "..", "nowhere"): filepath.Join(parent, "nowhere"),
+	} {
+		if got, err := ResolveProject(in); err != nil || got != want {
+			t.Errorf("ResolveProject(%s) = %s, %v; want %s", in, got, err, want)
+		}
 	}
 }

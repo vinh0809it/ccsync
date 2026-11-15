@@ -61,14 +61,21 @@ func projectDir(claudeDir, absPath string) (string, error) {
 }
 
 // ResolveProject returns the absolute, symlink-free form of a project
-// path — Claude Code files sessions under the real path.
+// path — Claude Code files sessions under the real path. For a path that
+// doesn't exist yet, its nearest existing ancestor is resolved.
 func ResolveProject(p string) (string, error) {
 	abs, err := filepath.Abs(p)
 	if err != nil {
 		return "", err
 	}
-	if real, err := filepath.EvalSymlinks(abs); err == nil {
-		return real, nil
+	rest := ""
+	for dir := abs; ; dir = filepath.Dir(dir) {
+		if real, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(real, rest), nil
+		}
+		if filepath.Dir(dir) == dir {
+			return abs, nil
+		}
+		rest = filepath.Join(filepath.Base(dir), rest)
 	}
-	return abs, nil
 }

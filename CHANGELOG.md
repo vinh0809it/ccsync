@@ -29,6 +29,10 @@
   `init` reported success with nothing on the remote and the store stayed
   unusable.
 - A pull into a subdirectory of the original project rewrote cwd twice.
+- `init` now accepts a repo created with a README (the store is added on
+  top) and a destination path that doesn't exist yet is resolved through
+  symlinked parents, like Claude Code does.
+- Git line-ending conversion (`core.autocrlf`) can no longer touch store blobs.
 - The GUI could run two git operations on the store at once.
 
 ### Changed

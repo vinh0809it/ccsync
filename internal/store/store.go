@@ -158,13 +158,23 @@ func (s *Store) Init(repoURL, passphrase string) error {
 	return SaveConfig(&Config{RepoURL: repoURL})
 }
 
-// syncOrReset brings a fresh or reused clone up to date. Without an
-// upstream the remote must be empty, and whatever an earlier init left
-// locally (its first push may have been rejected) never reached it, so it
-// is discarded.
+// syncOrReset brings a fresh or reused clone up to date for Init:
+//   - a store upstream: Sync;
+//   - another non-empty repo (e.g. one created with a README): fast-forward
+//     to it, keeping its files, and build the store on top;
+//   - no upstream: the remote must be empty, and whatever an earlier init
+//     left locally (its first push may have been rejected) never reached
+//     it, so it is discarded.
 func (s *Store) syncOrReset() error {
 	if _, err := s.git("rev-parse", "--verify", "--quiet", "@{u}"); err == nil {
-		return s.Sync()
+		if _, err := s.git("fetch", "--quiet", "origin"); err != nil {
+			return err
+		}
+		if s.upstreamIsStore() {
+			return s.Sync()
+		}
+		_, err := s.git("merge", "--ff-only", "--quiet", "@{u}")
+		return err
 	}
 	heads, err := s.git("ls-remote", "--heads", "origin")
 	if err != nil {

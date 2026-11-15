@@ -127,6 +127,7 @@
     box-shadow: none; }
   .btn.ghost:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
   .btn.sm { padding: 6px 12px; font-size: 13px; }
+  .btn.ghost.danger:not(:disabled):hover { border-color: var(--err); color: var(--err); }
 
   .search { position: relative; display: flex; align-items: center; }
   .search svg { position: absolute; left: 12px; color: var(--faint); pointer-events: none; }
@@ -612,7 +613,7 @@ function renderStore() {
       </div>
       <div class="side"><div class="t">${when(m.session_mtime)}</div><div class="s">${size(m.size)}</div></div>
       <button class="btn ghost sm" data-act="pull">Pull</button>
-      <button class="btn ghost sm" data-act="remove" aria-label="Delete from store" title="Delete from store">Delete</button>
+      <button class="btn ghost sm danger" data-act="remove" aria-label="Delete from store" title="Delete from store">Delete</button>
     </div>`).join('');
   list.querySelectorAll('.row.store').forEach(row => {
     const m = storeMetas.find(x => x.session_id === row.dataset.id);

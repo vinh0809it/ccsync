@@ -16,7 +16,9 @@ func (s *Store) gitIn(dir string, args ...string) (string, error) {
 	full := append([]string{"-C", dir,
 		"-c", "user.name=ccsync", "-c", "user.email=ccsync@localhost",
 		// A global signing setup would prompt or fail on store commits.
-		"-c", "commit.gpgsign=false"}, args...)
+		"-c", "commit.gpgsign=false",
+		// Blobs are binary; never let line-ending conversion touch them.
+		"-c", "core.autocrlf=false"}, args...)
 	cmd := exec.Command("git", full...)
 	// English messages: Push recognizes a lost race by git's wording.
 	cmd.Env = append(os.Environ(), "LC_ALL=C")
@@ -42,7 +44,7 @@ func (s *Store) Sync() error {
 		return err
 	}
 	// Sync discards local changes: be sure this is a ccsync store first.
-	if _, err := s.git("cat-file", "-e", "@{u}:"+markerFile); err != nil {
+	if !s.upstreamIsStore() {
 		return fmt.Errorf("%s does not track a ccsync store (no %s upstream) — check CCSYNC_STORE_DIR or run ccsync init", s.Dir, markerFile)
 	}
 	if _, err := s.git("reset", "--hard", "--quiet", "@{u}"); err != nil {
@@ -52,11 +54,23 @@ func (s *Store) Sync() error {
 	return err
 }
 
+// upstreamIsStore reports whether the fetched upstream holds a store marker.
+func (s *Store) upstreamIsStore() bool {
+	_, err := s.git("cat-file", "-e", "@{u}:"+markerFile)
+	return err == nil
+}
+
 // Commit commits staged changes. Only the sessions tree and the key files
 // are committed — a stray plaintext file elsewhere in the clone must never
 // end up in the (possibly public) remote.
 func (s *Store) Commit(message string) error {
-	paths := []string{sessionsDir, markerFile, checkFile, keyFile}
+	paths, err := s.storePaths()
+	if err != nil {
+		return err
+	}
+	if len(paths) == 0 {
+		return ErrNothingToCommit
+	}
 	if _, err := s.git(append([]string{"add", "-A", "--"}, paths...)...); err != nil {
 		return err
 	}
@@ -69,6 +83,35 @@ func (s *Store) Commit(message string) error {
 	}
 	_, err = s.git("commit", "--quiet", "-m", message)
 	return err
+}
+
+// storePaths returns the store's top-level paths that exist on disk or in
+// the index; git rejects a pathspec that matches neither.
+func (s *Store) storePaths() ([]string, error) {
+	all := []string{sessionsDir, markerFile, checkFile, keyFile}
+	tracked, err := s.git(append([]string{"ls-files", "--"}, all...)...)
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, p := range all {
+		_, statErr := os.Stat(s.path(p))
+		if statErr == nil || containsPath(tracked, p) {
+			paths = append(paths, p)
+		}
+	}
+	return paths, nil
+}
+
+// containsPath reports whether the newline-separated file list has p or a
+// file under p.
+func containsPath(list, p string) bool {
+	for _, f := range strings.Split(list, "\n") {
+		if f == p || strings.HasPrefix(f, p+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // Push publishes local commits. It returns ErrRemoteMoved (wrapped) when

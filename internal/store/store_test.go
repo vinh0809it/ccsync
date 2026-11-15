@@ -297,7 +297,7 @@ func TestInitRecoversFromFailedFirstPush(t *testing.T) {
 }
 
 // legacyStore pushes a format-1 store (as ccsync 0.1.x wrote it) holding
-// one session.
+// one session, or none when id is empty.
 func legacyStore(t *testing.T, remote, id, transcript string) {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "legacy")
@@ -308,8 +308,10 @@ func legacyStore(t *testing.T, remote, id, transcript string) {
 	files := map[string][]byte{
 		markerFile: []byte(`{"format":1}` + "\n"),
 		checkFile:  check,
-		filepath.Join(sessionsDir, id, "meta.age"): meta,
-		filepath.Join(sessionsDir, id, "data.age"): data,
+	}
+	if id != "" {
+		files[filepath.Join(sessionsDir, id, "meta.age")] = meta
+		files[filepath.Join(sessionsDir, id, "data.age")] = data
 	}
 	for name, content := range files {
 		os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0o755)
@@ -352,5 +354,41 @@ func TestMigrateFromFormat1(t *testing.T) {
 	}
 	if data, _ := other.Payload(key, id); string(data) != "bundle:raw transcript" {
 		t.Fatalf("migrated payload: %q", data)
+	}
+}
+
+// TestInitAdoptsRepoWithReadme: hosting services offer to create a repo
+// with a README; init must build the store on top of it.
+func TestInitAdoptsRepoWithReadme(t *testing.T) {
+	remote := testutil.Remote(t)
+	seed := filepath.Join(t.TempDir(), "seed")
+	testutil.Git(t, "", "clone", "--quiet", remote, seed)
+	os.WriteFile(filepath.Join(seed, "README.md"), []byte("# my sessions\n"), 0o644)
+	testutil.Git(t, seed, "add", "-A")
+	testutil.Git(t, seed, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "readme")
+	testutil.Git(t, seed, "push", "-q", "-u", "origin", "HEAD")
+
+	st := machine(t)
+	key := open(t, st, remote)
+	put(t, st, key, "12121212-aaaa-bbbb-cccc-000000000001", "x")
+	publish(t, st)
+	files := testutil.RemoteFiles(t, remote)
+	if !strings.Contains(files, "README.md") || !strings.Contains(files, markerFile) {
+		t.Fatalf("remote files:\n%s", files)
+	}
+}
+
+func TestMigrateEmptyFormat1Store(t *testing.T) {
+	remote := testutil.Remote(t)
+	legacyStore(t, remote, "", "")
+	st := machine(t)
+	if err := st.Init(remote, pass); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := st.Migrate(pass, nil); err != nil || n != 0 {
+		t.Fatalf("migrate: n=%d err=%v", n, err)
+	}
+	if _, err := st.Unlock(pass); err != nil {
+		t.Fatalf("unlock after migrating an empty store: %v", err)
 	}
 }
