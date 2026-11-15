@@ -214,9 +214,20 @@ func TestFullFlow(t *testing.T) {
 		bytes.Contains(data, []byte(`"cwd":"`+project+`"`)) {
 		t.Fatal("pulled transcript's cwd was not rewritten to the destination")
 	}
-	// Same pull again without force must fail; with force must succeed.
+	// Same pull again is a no-op. A diverged local copy is refused without
+	// force, and replaced — with a backup — with it.
+	var again2 struct{ Unchanged bool }
+	json.Unmarshal(e.call(t, "POST", "/api/pull", map[string]any{"id": id, "dest": dest}, true), &again2)
+	if !again2.Unchanged {
+		t.Fatal("identical re-pull should report unchanged")
+	}
+	os.WriteFile(pulled.Installed, []byte("diverged\n"), 0o600)
 	e.call(t, "POST", "/api/pull", map[string]any{"id": id, "dest": dest}, false)
-	e.call(t, "POST", "/api/pull", map[string]any{"id": id, "dest": dest, "force": true}, true)
+	var forced struct{ Backup string }
+	json.Unmarshal(e.call(t, "POST", "/api/pull", map[string]any{"id": id, "dest": dest, "force": true}, true), &forced)
+	if b, _ := os.ReadFile(forced.Backup); string(b) != "diverged\n" {
+		t.Fatal("forced pull did not back up the local copy")
+	}
 }
 
 func TestUnlockRejectsWrongPassphrase(t *testing.T) {

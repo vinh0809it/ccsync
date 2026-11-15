@@ -350,7 +350,7 @@
     <label>Install for project directory <span class="muted">(Claude Code creates it if missing)</span></label>
     <input id="pullDest" type="text" class="mono">
     <label class="selall" style="margin-top:12px">
-      <input type="checkbox" id="pullForce"> overwrite if it already exists locally</label>
+      <input type="checkbox" id="pullForce"> replace a different local copy (it is kept as a .bak file)</label>
     <div id="pullDone" class="donebox hidden"></div>
   </div>
   <div class="dlg-foot">
@@ -638,10 +638,13 @@ async function doPull() {
       id: pullTarget, dest, force: document.getElementById('pullForce').checked,
     });
     const done = document.getElementById('pullDone');
-    done.innerHTML = 'Installed. Resume with:<br><code class="copy" title="click to copy" ' +
+    const what = r.unchanged ? 'Already up to date.'
+      : r.backup ? `Installed (previous local copy kept as <code>${esc(r.backup)}</code>).`
+      : 'Installed.';
+    done.innerHTML = what + ' Resume with:<br><code class="copy" title="click to copy" ' +
       `onclick="navigator.clipboard.writeText(this.textContent);toast('Copied')">${esc(r.resume)}</code>`;
     done.classList.remove('hidden');
-    toast('Session installed');
+    toast(r.unchanged ? 'Already up to date' : 'Session installed');
   } catch (e) { toast(e.message, true); }
   busy('pullGo', 'pullSpin', false, 'pullGoLbl', 'Pulling…', 'Pull');
 }

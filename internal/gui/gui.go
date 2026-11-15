@@ -2,8 +2,8 @@
 //
 // The server binds to 127.0.0.1 only. Every /api/ request must carry a
 // random per-run token (handed out in the URL the browser is opened with),
-// so other local users on a shared machine cannot drive the API. The store
-// passphrase is held in memory after unlock and never written anywhere.
+// so other local users on a shared machine cannot drive the API. The
+// unlocked store key is held in memory and never written anywhere.
 package gui
 
 import (
@@ -16,24 +16,29 @@ import (
 	"net/http"
 	"os/exec"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
 	_ "embed"
 
-	"ccsync/internal/app"
-	"ccsync/internal/session"
-	"ccsync/internal/store"
+	"github.com/vinhvh0809/ccsync/internal/app"
+	"github.com/vinhvh0809/ccsync/internal/crypto"
+	"github.com/vinhvh0809/ccsync/internal/session"
+	"github.com/vinhvh0809/ccsync/internal/store"
 )
 
 //go:embed index.html
 var indexHTML []byte
 
-
 type Server struct {
 	mu    sync.Mutex
-	pass  string // set after a successful unlock
+	key   *crypto.Key // set after a successful unlock
 	token string
+
+	// op serializes everything that touches the store clone: two git
+	// operations must never run on it at once.
+	op sync.Mutex
 }
 
 func NewServer() (*Server, error) {
@@ -57,7 +62,11 @@ func (s *Server) Handler() http.Handler {
 		w.Write(indexHTML)
 	})
 	api := func(path string, h http.HandlerFunc) {
-		mux.HandleFunc(path, s.requireToken(h))
+		mux.HandleFunc(path, s.requireToken(func(w http.ResponseWriter, r *http.Request) {
+			s.op.Lock()
+			defer s.op.Unlock()
+			h(w, r)
+		}))
 	}
 	api("/api/state", s.handleState)
 	api("/api/setup", s.handleSetup)
@@ -73,6 +82,7 @@ func (s *Server) Handler() http.Handler {
 // Listen binds the GUI server to 127.0.0.1:port (0 picks a free port) and
 // returns the listener plus the tokenized URL front-ends should open.
 func Listen(port int) (net.Listener, *Server, string, error) {
+	store.NoPrompt = true
 	s, err := NewServer()
 	if err != nil {
 		return nil, nil, "", err
@@ -142,13 +152,19 @@ func decode(r *http.Request, v any) error {
 	return json.NewDecoder(r.Body).Decode(v)
 }
 
-func (s *Server) passphrase() (string, error) {
+func (s *Server) unlocked() (*crypto.Key, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.pass == "" {
-		return "", fmt.Errorf("locked — unlock with the store passphrase first")
+	if s.key == nil {
+		return nil, fmt.Errorf("locked — unlock with the store passphrase first")
 	}
-	return s.pass, nil
+	return s.key, nil
+}
+
+func (s *Server) setKey(k *crypto.Key) {
+	s.mu.Lock()
+	s.key = k
+	s.mu.Unlock()
 }
 
 // --- handlers ---
@@ -156,7 +172,7 @@ func (s *Server) passphrase() (string, error) {
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	cfg, err := store.LoadConfig()
 	s.mu.Lock()
-	unlocked := s.pass != ""
+	unlocked := s.key != nil
 	s.mu.Unlock()
 	state := map[string]any{
 		"configured": err == nil,
@@ -181,10 +197,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, err)
 		return
 	}
-	s.mu.Lock()
-	s.pass = req.Passphrase
-	s.mu.Unlock()
-	ok(w, nil)
+	s.unlock(w, req.Passphrase)
 }
 
 func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
@@ -195,17 +208,19 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, fmt.Errorf("passphrase is required"))
 		return
 	}
-	if err := store.Sync(); err != nil {
-		fail(w, http.StatusInternalServerError, err)
-		return
-	}
-	if err := store.VerifyPassphrase(req.Passphrase); err != nil {
+	s.unlock(w, req.Passphrase)
+}
+
+// unlock opens the store key. A format-1 store is not migrated here:
+// migration locks out machines still on ccsync 0.1.x, so it is an explicit
+// `ccsync migrate`.
+func (s *Server) unlock(w http.ResponseWriter, pass string) {
+	key, err := app.Unlock(pass)
+	if err != nil {
 		fail(w, http.StatusForbidden, err)
 		return
 	}
-	s.mu.Lock()
-	s.pass = req.Passphrase
-	s.mu.Unlock()
+	s.setKey(key)
 	ok(w, nil)
 }
 
@@ -243,7 +258,7 @@ func (s *Server) handleLocal(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStore(w http.ResponseWriter, r *http.Request) {
-	pass, err := s.passphrase()
+	key, err := s.unlocked()
 	if err != nil {
 		fail(w, http.StatusForbidden, err)
 		return
@@ -252,7 +267,7 @@ func (s *Server) handleStore(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, err)
 		return
 	}
-	metas, err := store.List(pass)
+	metas, _, err := store.List(key)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err)
 		return
@@ -264,7 +279,7 @@ func (s *Server) handleStore(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
-	pass, err := s.passphrase()
+	key, err := s.unlocked()
 	if err != nil {
 		fail(w, http.StatusForbidden, err)
 		return
@@ -301,7 +316,7 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 			selected = append(selected, s)
 		}
 	}
-	pushed, skipped, err := app.Push(pass, selected, req.Project, req.Force)
+	pushed, skipped, err := app.Push(key, selected, req.Project, req.Force)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err)
 		return
@@ -310,7 +325,7 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePull(w http.ResponseWriter, r *http.Request) {
-	pass, err := s.passphrase()
+	key, err := s.unlocked()
 	if err != nil {
 		fail(w, http.StatusForbidden, err)
 		return
@@ -324,13 +339,29 @@ func (s *Server) handlePull(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, fmt.Errorf("id and dest are required"))
 		return
 	}
-	meta, target, err := app.Pull(pass, req.ID, req.Dest, req.Force)
+	res, err := app.Pull(key, req.ID, req.Dest, req.Force)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err)
 		return
 	}
 	ok(w, map[string]any{
-		"installed": target,
-		"resume":    fmt.Sprintf("cd %s && claude --resume %s", req.Dest, meta.SessionID),
+		"installed": res.Target,
+		"backup":    res.Backup,
+		"unchanged": res.Unchanged,
+		"resume":    fmt.Sprintf("cd %s && claude --resume %s", shellQuote(res.Dest), res.Meta.SessionID),
 	})
+}
+
+// shellQuote quotes p for the user's shell when it needs it.
+func shellQuote(p string) string {
+	if runtime.GOOS == "windows" {
+		return `"` + p + `"`
+	}
+	if strings.IndexFunc(p, func(r rune) bool {
+		return !(r == '/' || r == '-' || r == '_' || r == '.' || r == '~' ||
+			(r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9'))
+	}) < 0 {
+		return p
+	}
+	return "'" + strings.ReplaceAll(p, "'", `'\''`) + "'"
 }

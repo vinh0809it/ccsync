@@ -1,17 +1,23 @@
-// Package session reads Claude Code's local session storage
-// (~/.claude/projects/<path-slug>/<session-id>.jsonl).
+// Package session reads and writes Claude Code's local session storage.
 //
-// The .jsonl transcript format is internal to Claude Code and changes
-// between versions, so this package treats files as opaque blobs. It only
-// (a) scans lines for a few metadata fields, degrading gracefully when
-// they are missing, and (b) rewrites the exact `"cwd":"..."` substring
-// when a session is installed under a different project path.
+// A session is a transcript plus an optional companion directory:
+//
+//	~/.claude/projects/<slug>/<id>.jsonl      the transcript
+//	~/.claude/projects/<slug>/<id>/           subagents/, tool-results/, ...
+//
+// The .jsonl format is internal to Claude Code and changes between
+// versions, so this package treats files as opaque blobs. It only (a) scans
+// lines for a few metadata fields, degrading gracefully when they are
+// missing, and (b) rewrites two exact kinds of path when a session is
+// installed somewhere else: the structural "cwd" fields and references to
+// the session's own companion directory.
 package session
 
 import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,9 +38,12 @@ func ClaudeDir() (string, error) {
 	return filepath.Join(home, ".claude"), nil
 }
 
+// maxSlug is the longest project-directory name Claude Code uses as is;
+// longer ones are cut and given a hash suffix that can't be reproduced.
+const maxSlug = 200
+
 // SlugForPath reproduces Claude Code's project-directory naming: every
 // non-alphanumeric character of the absolute path becomes '-'.
-// (Paths >200 chars get truncated+hashed by Claude Code; not handled here.)
 func SlugForPath(p string) string {
 	var b strings.Builder
 	for _, r := range p {
@@ -47,24 +56,40 @@ func SlugForPath(p string) string {
 	return b.String()
 }
 
-// Session describes one local session transcript.
+// Session describes one local session.
 type Session struct {
 	ID      string
 	File    string // absolute path to the .jsonl
+	Dir     string // companion directory (may not exist)
 	Cwd     string // original project path, extracted from the transcript
 	Title   string
-	Version string // Claude Code version that wrote it
-	Mtime   time.Time
-	Size    int64
+	Version string    // Claude Code version that wrote it
+	Mtime   time.Time // newest modification of the transcript or companion files
+	Size    int64     // transcript plus companion files
 }
 
 // validSlug matches Claude Code project-directory names (alphanumerics and
 // dashes only) so an externally supplied slug can never traverse paths.
 var validSlug = regexp.MustCompile(`^[A-Za-z0-9-]{1,255}$`)
 
+// validID constrains session ids to safe path components. Ids can come from
+// peer-written store metadata and are used in filepath.Join.
+var validID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,63}$`)
+
+// ValidID reports whether id is safe to use as a path component.
+func ValidID(id string) bool { return validID.MatchString(id) }
+
 // ListForProject returns the sessions stored for the project at absPath.
 func ListForProject(absPath string) ([]Session, error) {
-	return ListForSlug(SlugForPath(absPath))
+	claudeDir, err := ClaudeDir()
+	if err != nil {
+		return nil, err
+	}
+	dir, err := projectDir(claudeDir, absPath)
+	if err != nil {
+		return nil, err
+	}
+	return ListForSlug(filepath.Base(dir))
 }
 
 // ListForSlug returns the sessions in one project storage directory,
@@ -88,18 +113,17 @@ func ListForSlug(slug string) ([]Session, error) {
 	}
 	var out []Session
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+		id, isTranscript := strings.CutSuffix(e.Name(), ".jsonl")
+		if e.IsDir() || !isTranscript || !ValidID(id) {
 			continue
 		}
 		file := filepath.Join(dir, e.Name())
-		s, err := inspect(file)
+		s, err := Load(file)
 		if err != nil {
 			// Unreadable metadata must not hide the session.
-			info, _ := e.Info()
-			s = Session{ID: strings.TrimSuffix(e.Name(), ".jsonl"), File: file}
-			if info != nil {
-				s.Mtime = info.ModTime()
-				s.Size = info.Size()
+			s = Session{ID: id, File: file, Dir: filepath.Join(dir, id)}
+			if info, err := e.Info(); err == nil {
+				s.Mtime, s.Size = info.ModTime(), info.Size()
 			}
 		}
 		out = append(out, s)
@@ -133,7 +157,7 @@ func ListProjects() ([]Project, error) {
 	}
 	var out []Project
 	for _, e := range entries {
-		if !e.IsDir() {
+		if !e.IsDir() || !validSlug.MatchString(e.Name()) {
 			continue
 		}
 		dir := filepath.Join(root, e.Name())
@@ -156,7 +180,7 @@ func ListProjects() ([]Project, error) {
 		if p.Sessions == 0 {
 			continue
 		}
-		if s, err := inspect(newest); err == nil {
+		if s, err := Load(newest); err == nil {
 			p.Path = s.Cwd
 		}
 		out = append(out, p)
@@ -164,19 +188,24 @@ func ListProjects() ([]Project, error) {
 	return out, nil
 }
 
-// inspect scans a transcript for id, title, cwd and version without
-// depending on the full line schema.
-func inspect(file string) (Session, error) {
-	s := Session{
-		ID:   strings.TrimSuffix(filepath.Base(file), ".jsonl"),
-		File: file,
-	}
+// Load reads a session's metadata without depending on the full line
+// schema. The whole transcript is scanned: a rename appends a new
+// custom-title line, so the last one wins.
+func Load(file string) (Session, error) {
+	id := strings.TrimSuffix(filepath.Base(file), ".jsonl")
+	s := Session{ID: id, File: file, Dir: filepath.Join(filepath.Dir(file), id)}
 	info, err := os.Stat(file)
 	if err != nil {
 		return s, err
 	}
-	s.Mtime = info.ModTime()
-	s.Size = info.Size()
+	s.Mtime, s.Size = info.ModTime(), info.Size()
+	_ = walkCompanion(s.Dir, func(_ string, fi os.FileInfo) error {
+		s.Size += fi.Size()
+		if fi.ModTime().After(s.Mtime) {
+			s.Mtime = fi.ModTime()
+		}
+		return nil
+	})
 
 	f, err := os.Open(file)
 	if err != nil {
@@ -191,71 +220,124 @@ func inspect(file string) (Session, error) {
 		Version     string `json:"version"`
 	}
 	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024)
+	sc.Buffer(make([]byte, 0, 1024*1024), 64*1024*1024)
 	for sc.Scan() {
-		var l line
-		if json.Unmarshal(sc.Bytes(), &l) != nil {
+		b := sc.Bytes()
+		// Cheap pre-filter: most lines are large messages without the
+		// fields still wanted.
+		if !(bytes.Contains(b, []byte(`"custom-title"`)) ||
+			(s.Cwd == "" && bytes.Contains(b, []byte(`"cwd"`))) ||
+			(s.Version == "" && bytes.Contains(b, []byte(`"version"`)))) {
 			continue
 		}
-		if l.Type == "custom-title" && s.Title == "" {
+		var l line
+		if json.Unmarshal(b, &l) != nil {
+			continue
+		}
+		if l.Type == "custom-title" && l.CustomTitle != "" {
 			s.Title = l.CustomTitle
 		}
-		if l.Cwd != "" && s.Cwd == "" {
+		if s.Cwd == "" {
 			s.Cwd = l.Cwd
 		}
-		if l.Version != "" && s.Version == "" {
+		if s.Version == "" {
 			s.Version = l.Version
-		}
-		if s.Title != "" && s.Cwd != "" && s.Version != "" {
-			break
 		}
 	}
 	return s, sc.Err()
 }
 
-// RewriteCwd swaps the structural cwd field from oldCwd to newCwd.
-// Only the exact JSON substring `"cwd":"<oldCwd>"` is replaced; paths
-// inside message content are deliberately left untouched.
+// walkCompanion calls fn for every regular file under a companion
+// directory with its slash-separated relative path. Symlinks and other
+// special files are skipped; a missing directory is not an error.
+func walkCompanion(dir string, fn func(rel string, fi os.FileInfo) error) error {
+	err := filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		fi, err := d.Info()
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(dir, p)
+		if err != nil {
+			return err
+		}
+		return fn(filepath.ToSlash(rel), fi)
+	})
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
+// jsonString is s as a JSON string body (no quotes), escaped the way
+// Claude Code's JSON.stringify writes it.
+func jsonString(s string) string {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(s)
+	out := strings.TrimSpace(buf.String())
+	return out[1 : len(out)-1]
+}
+
+// RewriteCwd moves the structural cwd fields from oldCwd to newCwd. Both
+// the project root and its subdirectories ("cwd":"<old>/sub") are
+// rewritten; paths inside message content are deliberately left alone.
 func RewriteCwd(data []byte, oldCwd, newCwd string) []byte {
 	if oldCwd == "" || oldCwd == newCwd {
 		return data
 	}
-	oldJSON, err1 := json.Marshal(oldCwd)
-	newJSON, err2 := json.Marshal(newCwd)
-	if err1 != nil || err2 != nil {
-		return data
+	oldP := `"cwd":"` + jsonString(oldCwd)
+	newP := `"cwd":"` + jsonString(newCwd)
+	for _, end := range []string{`"`, `/`, `\\`} {
+		data = bytes.ReplaceAll(data, []byte(oldP+end), []byte(newP+end))
 	}
-	return bytes.ReplaceAll(data,
-		[]byte(`"cwd":`+string(oldJSON)),
-		[]byte(`"cwd":`+string(newJSON)))
+	return data
 }
 
-// validInstallID mirrors store.ValidSessionID: ids come from (possibly
-// peer-written) store metadata and are used as a path component here.
-var validInstallID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,63}$`)
-
-// Install writes transcript data as a session for the project at destPath,
-// creating the project dir with the permissions Claude Code uses.
-func Install(id string, data []byte, destPath string, force bool) (string, error) {
-	if !validInstallID.MatchString(id) {
-		return "", fmt.Errorf("refusing to install session with unsafe id %q", id)
+// RewritePath replaces every occurrence of the JSON-encoded oldPath with
+// newPath. Used for the session's companion directory, whose path (ending
+// in the session uuid) is specific enough to rewrite anywhere — Claude
+// Code points at it from message content ("Full output saved to: ...").
+func RewritePath(data []byte, oldPath, newPath string) []byte {
+	if oldPath == "" || oldPath == newPath {
+		return data
 	}
-	claudeDir, err := ClaudeDir()
+	return bytes.ReplaceAll(data, []byte(jsonString(oldPath)), []byte(jsonString(newPath)))
+}
+
+// projectDir returns Claude Code's storage directory for the project at
+// absPath. Names over maxSlug characters get an unreproducible hash suffix,
+// so for those an existing directory sharing the kept prefix is reused.
+func projectDir(claudeDir, absPath string) (string, error) {
+	slug := SlugForPath(absPath)
+	root := filepath.Join(claudeDir, "projects")
+	if len(slug) <= maxSlug {
+		return filepath.Join(root, slug), nil
+	}
+	entries, _ := os.ReadDir(root)
+	for _, e := range entries {
+		if e.IsDir() && strings.HasPrefix(e.Name(), slug[:maxSlug]) {
+			return filepath.Join(root, e.Name()), nil
+		}
+	}
+	return "", fmt.Errorf("project path is too long for ccsync to derive Claude Code's folder name: start one Claude Code session in %s first, then retry", absPath)
+}
+
+// ResolveProject returns the absolute, symlink-free form of a project
+// path — Claude Code files sessions under the real path.
+func ResolveProject(p string) (string, error) {
+	abs, err := filepath.Abs(p)
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(claudeDir, "projects", SlugForPath(destPath))
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
+	if real, err := filepath.EvalSymlinks(abs); err == nil {
+		return real, nil
 	}
-	target := filepath.Join(dir, id+".jsonl")
-	if !force {
-		if _, err := os.Stat(target); err == nil {
-			return "", fmt.Errorf("%s already exists locally (use --force to overwrite)", target)
-		}
-	}
-	if err := os.WriteFile(target, data, 0o600); err != nil {
-		return "", err
-	}
-	return target, nil
+	return abs, nil
 }

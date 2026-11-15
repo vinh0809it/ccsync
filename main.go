@@ -6,19 +6,32 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"time"
 
 	"golang.org/x/term"
 
-	"ccsync/internal/app"
-	"ccsync/internal/gui"
-	"ccsync/internal/session"
-	"ccsync/internal/store"
+	"github.com/vinhvh0809/ccsync/internal/app"
+	"github.com/vinhvh0809/ccsync/internal/crypto"
+	"github.com/vinhvh0809/ccsync/internal/gui"
+	"github.com/vinhvh0809/ccsync/internal/session"
+	"github.com/vinhvh0809/ccsync/internal/store"
 )
 
+// version is set at build time with -ldflags "-X main.version=...".
+var version string
+
+func versionString() string {
+	if version != "" {
+		return version
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return bi.Main.Version // go install module@version
+	}
+	return "dev"
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -39,6 +52,10 @@ func main() {
 		err = cmdSessions(os.Args[2:])
 	case "gui":
 		err = cmdGui(os.Args[2:])
+	case "migrate":
+		err = cmdMigrate(os.Args[2:])
+	case "version", "-v", "--version":
+		fmt.Println("ccsync", versionString())
 	case "help", "-h", "--help":
 		usage()
 	default:
@@ -67,11 +84,25 @@ Usage:
   ccsync gui [--port N] [--no-open] [--browser]
                                     GUI (native window in desktop builds,
                                     otherwise local web page; setup/push/pull)
+  ccsync migrate                    upgrade a store made by ccsync 0.1.x
+  ccsync version                    print the version
 
 The passphrase is asked interactively (or read from $CCSYNC_PASSPHRASE).
 Everything in the repo is encrypted; git credentials are never touched —
 pushing/pulling uses your existing git auth (SSH key or credential helper).
 `)
+}
+
+// unlock asks for the passphrase and opens the configured store.
+func unlock() (*crypto.Key, error) {
+	if _, err := store.LoadConfig(); err != nil {
+		return nil, err
+	}
+	pass, err := passphrase(false)
+	if err != nil {
+		return nil, err
+	}
+	return app.Unlock(pass)
 }
 
 func passphrase(confirm bool) (string, error) {
@@ -132,9 +163,9 @@ func projectFlag(fs *flag.FlagSet) *string {
 
 func resolveProject(p string) (string, error) {
 	if p == "" {
-		return os.Getwd()
+		p = "."
 	}
-	return filepath.Abs(p)
+	return session.ResolveProject(p)
 }
 
 func cmdInit(args []string) error {
@@ -241,11 +272,11 @@ func cmdPush(args []string) error {
 		return fmt.Errorf("nothing to push")
 	}
 
-	pass, err := passphrase(false)
+	key, err := unlock()
 	if err != nil {
 		return err
 	}
-	pushed, skipped, err := app.Push(pass, selected, p, *force)
+	pushed, skipped, err := app.Push(key, selected, p, *force)
 	if err != nil {
 		return err
 	}
@@ -260,22 +291,16 @@ func cmdPush(args []string) error {
 }
 
 func cmdLs(args []string) error {
-	if _, err := store.LoadConfig(); err != nil {
-		return err
-	}
-	pass, err := passphrase(false)
+	key, err := unlock()
 	if err != nil {
 		return err
 	}
-	if err := store.Sync(); err != nil {
-		return err
-	}
-	if err := store.VerifyPassphrase(pass); err != nil {
-		return err
-	}
-	metas, err := store.List(pass)
+	metas, unreadable, err := store.List(key)
 	if err != nil {
 		return err
+	}
+	for _, id := range unreadable {
+		fmt.Fprintf(os.Stderr, "warning: can't read %s (pushed by an outdated ccsync? run: ccsync migrate)\n", id)
 	}
 	if len(metas) == 0 {
 		fmt.Println("store is empty")
@@ -298,20 +323,43 @@ func cmdPull(args []string) error {
 	if fs.NArg() != 1 || *to == "" {
 		return fmt.Errorf("usage: ccsync pull <session-id> --to <project-dir>")
 	}
+	key, err := unlock()
+	if err != nil {
+		return err
+	}
+	res, err := app.Pull(key, fs.Arg(0), *to, *force)
+	if err != nil {
+		return err
+	}
+	switch {
+	case res.Unchanged:
+		fmt.Printf("already up to date: %s\n", res.Target)
+	case res.Backup != "":
+		fmt.Printf("installed %s\n(previous local copy kept as %s)\n", res.Target, res.Backup)
+	default:
+		fmt.Printf("installed %s\n", res.Target)
+	}
+	fmt.Printf("resume with:\n  cd %s && claude --resume %s\n", res.Dest, res.Meta.SessionID)
+	return nil
+}
+
+func cmdMigrate(args []string) error {
+	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
+	fs.Parse(args)
 	if _, err := store.LoadConfig(); err != nil {
 		return err
 	}
+	fmt.Fprintln(os.Stderr, "NOTE: after migrating, ccsync 0.1.x can no longer read this store —")
+	fmt.Fprintln(os.Stderr, "      upgrade ccsync on every machine.")
 	pass, err := passphrase(false)
 	if err != nil {
 		return err
 	}
-	meta, target, err := app.Pull(pass, fs.Arg(0), *to, *force)
+	n, err := app.Migrate(pass)
 	if err != nil {
 		return err
 	}
-	dest, _ := filepath.Abs(*to)
-	fmt.Printf("installed %s\n", target)
-	fmt.Printf("resume with:\n  cd %s && claude --resume %s\n", dest, meta.SessionID)
+	fmt.Printf("store is at format %d (%d session(s) converted).\n", store.Format, n)
 	return nil
 }
 

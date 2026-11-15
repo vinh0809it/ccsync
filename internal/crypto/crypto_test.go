@@ -50,3 +50,38 @@ func TestCheckBlob(t *testing.T) {
 		t.Fatalf("error should hint at the passphrase, got: %v", err)
 	}
 }
+
+func TestKeyWrapAndEncrypt(t *testing.T) {
+	key, err := NewKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapped, err := key.Wrap("store pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UnwrapKey("wrong", wrapped); err == nil {
+		t.Fatal("wrong passphrase unwrapped the key")
+	}
+	again, err := UnwrapKey("store pass", wrapped)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plain := []byte("transcript with API_KEY=hunter2")
+	blob, err := key.Encrypt(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(blob, []byte("hunter2")) {
+		t.Fatal("ciphertext leaks plaintext")
+	}
+	got, err := again.Decrypt(blob)
+	if err != nil || !bytes.Equal(got, plain) {
+		t.Fatalf("unwrapped key can't decrypt: %v", err)
+	}
+	other, _ := NewKey()
+	if _, err := other.Decrypt(blob); err == nil {
+		t.Fatal("a different key decrypted the blob")
+	}
+}

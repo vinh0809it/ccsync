@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,8 +9,28 @@ import (
 	"testing"
 	"time"
 
-	"ccsync/internal/crypto"
+	"github.com/vinhvh0809/ccsync/internal/crypto"
 )
+
+// open inits this machine against remote and returns the unlocked key.
+func open(t *testing.T, remote string) *crypto.Key {
+	t.Helper()
+	if err := Init(remote, pass); err != nil {
+		t.Fatal(err)
+	}
+	key, err := Unlock(pass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return key
+}
+
+func put(t *testing.T, key *crypto.Key, id, title string, payload []byte) {
+	t.Helper()
+	if err := Put(key, Meta{SessionID: id, Title: title, OriginalCwd: "/home/alice/webapp", Hostname: "machine-a", SessionMtime: time.Now()}, payload); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // newRemote creates a bare git repo to act as the store's origin.
 func newRemote(t *testing.T) string {
@@ -35,13 +56,8 @@ func TestInitPushListGetRoundTrip(t *testing.T) {
 	remote := newRemote(t)
 	machine(t)
 
-	if err := Init(remote, pass); err != nil {
-		t.Fatal(err)
-	}
-	if err := VerifyPassphrase(pass); err != nil {
-		t.Fatal(err)
-	}
-	if err := VerifyPassphrase("wrong"); err == nil {
+	key := open(t, remote)
+	if _, err := Unlock("wrong"); err == nil {
 		t.Fatal("wrong passphrase accepted")
 	}
 
@@ -56,18 +72,21 @@ func TestInitPushListGetRoundTrip(t *testing.T) {
 		Size:         int64(len(transcript)),
 		PushedAt:     time.Now().UTC(),
 	}
-	if err := Put(pass, meta, transcript); err != nil {
+	if err := Put(key, meta, transcript); err != nil {
 		t.Fatal(err)
 	}
 	if err := Commit("test push"); err != nil {
 		t.Fatal(err)
 	}
+	if err := Push(); err != nil {
+		t.Fatal(err)
+	}
 	// Nothing staged now: Commit must refuse.
-	if err := Commit("empty"); err == nil {
-		t.Fatal("commit with nothing staged should fail")
+	if err := Commit("empty"); err != ErrNothingToCommit {
+		t.Fatalf("commit with nothing staged: %v", err)
 	}
 
-	metas, err := List(pass)
+	metas, _, err := List(key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,14 +94,14 @@ func TestInitPushListGetRoundTrip(t *testing.T) {
 		t.Fatalf("bad listing: %+v", metas)
 	}
 
-	got, data, err := Get(pass, "33333333")
+	got, data, err := Get(key, "33333333")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.SessionID != meta.SessionID || string(data) != string(transcript) {
 		t.Fatal("Get returned wrong session or corrupted data")
 	}
-	if _, _, err := Get(pass, "99999999"); err == nil {
+	if _, _, err := Get(key, "99999999"); err == nil {
 		t.Fatal("unknown id should fail")
 	}
 }
@@ -92,9 +111,7 @@ func TestInitPushListGetRoundTrip(t *testing.T) {
 func TestNothingReadableInRemote(t *testing.T) {
 	remote := newRemote(t)
 	machine(t)
-	if err := Init(remote, pass); err != nil {
-		t.Fatal(err)
-	}
+	key := open(t, remote)
 	transcript := []byte(`{"cwd":"/home/alice/topsecret","note":"MARKER_SECRET_CONTENT"}` + "\n")
 	meta := Meta{
 		SessionID:    "44444444-aaaa-bbbb-cccc-000000000001",
@@ -104,10 +121,13 @@ func TestNothingReadableInRemote(t *testing.T) {
 		Hostname:     "MARKER_HOSTNAME",
 		SessionMtime: time.Now(),
 	}
-	if err := Put(pass, meta, transcript); err != nil {
+	if err := Put(key, meta, transcript); err != nil {
 		t.Fatal(err)
 	}
 	if err := Commit("push"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Push(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -158,23 +178,21 @@ func grepTree(t *testing.T, root, needle string) bool {
 func TestForgedMetaRejected(t *testing.T) {
 	remote := newRemote(t)
 	machine(t)
-	if err := Init(remote, pass); err != nil {
-		t.Fatal(err)
-	}
+	key := open(t, remote)
 	dir, _ := Dir()
 	evil := filepath.Join(dir, "sessions", "66666666-aaaa-bbbb-cccc-00000000000e")
 	if err := os.MkdirAll(evil, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	metaJSON := `{"session_id":"../../../../home/victim/.bashrc","title":"forged"}`
-	blob, err := crypto.Encrypt(pass, []byte(metaJSON))
+	blob, err := key.Encrypt([]byte(metaJSON))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(evil, "meta.age"), blob, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	data, err := crypto.Encrypt(pass, []byte("payload"))
+	data, err := key.Encrypt([]byte("payload"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +200,7 @@ func TestForgedMetaRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	metas, err := List(pass)
+	metas, _, err := List(key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +209,7 @@ func TestForgedMetaRejected(t *testing.T) {
 			t.Fatal("forged meta surfaced in List")
 		}
 	}
-	if _, _, err := Get(pass, "66666666"); err == nil {
+	if _, _, err := Get(key, "66666666"); err == nil {
 		t.Fatal("Get returned a session with mismatched metadata id")
 	}
 	// A directory name that is itself unsafe is skipped outright.
@@ -220,9 +238,7 @@ func TestTwoMachines(t *testing.T) {
 
 	// Machine A
 	machine(t)
-	if err := Init(remote, pass); err != nil {
-		t.Fatal(err)
-	}
+	key := open(t, remote)
 	transcript := []byte(`{"cwd":"/home/alice/webapp"}` + "\n")
 	meta := Meta{
 		SessionID:    "55555555-aaaa-bbbb-cccc-000000000001",
@@ -232,10 +248,13 @@ func TestTwoMachines(t *testing.T) {
 		Hostname:     "machine-a",
 		SessionMtime: time.Now(),
 	}
-	if err := Put(pass, meta, transcript); err != nil {
+	if err := Put(key, meta, transcript); err != nil {
 		t.Fatal(err)
 	}
 	if err := Commit("from A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Push(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -244,17 +263,134 @@ func TestTwoMachines(t *testing.T) {
 	if err := Init(remote, "wrong-pass"); err == nil {
 		t.Fatal("machine B init with wrong passphrase should fail")
 	}
-	if err := Init(remote, pass); err != nil {
-		t.Fatal(err)
-	}
-	if err := Sync(); err != nil {
-		t.Fatal(err)
-	}
-	got, data, err := Get(pass, "55555555")
+	keyB := open(t, remote)
+	got, data, err := Get(keyB, "55555555")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Hostname != "machine-a" || string(data) != string(transcript) {
 		t.Fatal("machine B did not receive machine A's session intact")
+	}
+}
+
+// TestSyncRecoversDirtyClone: leftovers of an interrupted run (staged,
+// modified, untracked or committed-but-unpushed files) are discarded.
+func TestSyncRecoversDirtyClone(t *testing.T) {
+	remote := newRemote(t)
+	machine(t)
+	key := open(t, remote)
+	dir, _ := Dir()
+
+	put(t, key, "77777777-aaaa-bbbb-cccc-000000000001", "unpushed", []byte("x"))
+	if err := Commit("never pushed"); err != nil {
+		t.Fatal(err)
+	}
+	put(t, key, "77777777-aaaa-bbbb-cccc-000000000002", "staged", []byte("y"))
+	git(dir, "add", "-A")
+	os.WriteFile(filepath.Join(dir, "stray.txt"), []byte("junk"), 0o644)
+	os.WriteFile(filepath.Join(dir, markerFile), []byte("garbage"), 0o644)
+
+	if err := Sync(); err != nil {
+		t.Fatal(err)
+	}
+	if out, _ := git(dir, "status", "--porcelain"); out != "" {
+		t.Fatalf("clone still dirty after Sync: %q", out)
+	}
+	if ahead, _ := git(dir, "rev-list", "--count", "@{u}..HEAD"); ahead != "0" {
+		t.Fatalf("unpushed commits survived Sync: %s", ahead)
+	}
+	if _, err := Unlock(pass); err != nil {
+		t.Fatalf("store unusable after recovery: %v", err)
+	}
+}
+
+// TestPushDetectsRemoteMoved: a push from a clone that fell behind fails
+// with ErrRemoteMoved (which callers retry) instead of a generic error.
+func TestPushDetectsRemoteMoved(t *testing.T) {
+	remote := newRemote(t)
+	machine(t)
+	key := open(t, remote)
+	cfgA, storeA := os.Getenv("CCSYNC_CONFIG_DIR"), os.Getenv("CCSYNC_STORE_DIR")
+
+	machine(t)
+	keyB := open(t, remote)
+	put(t, keyB, "88888888-aaaa-bbbb-cccc-000000000001", "from B", []byte("b"))
+	if err := Commit("B"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Push(); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("CCSYNC_CONFIG_DIR", cfgA)
+	t.Setenv("CCSYNC_STORE_DIR", storeA)
+	put(t, key, "88888888-aaaa-bbbb-cccc-000000000002", "from A", []byte("a"))
+	if err := Commit("A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Push(); !errors.Is(err, ErrRemoteMoved) {
+		t.Fatalf("want ErrRemoteMoved, got %v", err)
+	}
+}
+
+// legacyStore writes a format-1 store (as ccsync 0.1.x did) holding one
+// session, and pushes it.
+func legacyStore(t *testing.T, remote, id string, transcript []byte) {
+	t.Helper()
+	machine(t)
+	dir, _ := Dir()
+	if out, err := exec.Command("git", "clone", "--quiet", remote, dir).CombinedOutput(); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	check, _ := crypto.NewCheckBlob(pass)
+	os.WriteFile(filepath.Join(dir, markerFile), []byte(`{"format":1}`+"\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, checkFile), check, 0o644)
+	sdir := filepath.Join(dir, "sessions", id)
+	os.MkdirAll(sdir, 0o755)
+	meta, _ := crypto.Encrypt(pass, []byte(`{"session_id":"`+id+`","title":"old","original_cwd":"/home/alice/webapp"}`))
+	data, _ := crypto.Encrypt(pass, transcript)
+	os.WriteFile(filepath.Join(sdir, "meta.age"), meta, 0o644)
+	os.WriteFile(filepath.Join(sdir, "data.age"), data, 0o644)
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", "v1"}, {"push", "-q", "-u", "origin", "HEAD"}} {
+		if _, err := git(dir, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestMigrateFromFormat1(t *testing.T) {
+	remote := newRemote(t)
+	id := "99999999-aaaa-bbbb-cccc-000000000001"
+	transcript := []byte(`{"cwd":"/home/alice/webapp"}` + "\n")
+	legacyStore(t, remote, id, transcript)
+
+	// A new machine can join a format-1 store, but must migrate to use it.
+	machine(t)
+	if err := Init(remote, pass); err != nil {
+		t.Fatalf("init on a format-1 store: %v", err)
+	}
+	if _, err := Unlock(pass); err != ErrNeedsMigration {
+		t.Fatalf("want ErrNeedsMigration, got %v", err)
+	}
+	if _, err := Migrate("wrong", nil); err == nil {
+		t.Fatal("migrate accepted a wrong passphrase")
+	}
+	wrap := func(b []byte) ([]byte, string, error) { return append([]byte("bundle:"), b...), "h", nil }
+	if n, err := Migrate(pass, wrap); err != nil || n != 1 {
+		t.Fatalf("migrate: n=%d err=%v", n, err)
+	}
+	if n, err := Migrate(pass, wrap); err != nil || n != 0 {
+		t.Fatalf("second migrate should be a no-op: n=%d err=%v", n, err)
+	}
+
+	// Another machine sees the migrated store.
+	machine(t)
+	key := open(t, remote)
+	m, payload, err := Get(key, "99999999")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Title != "old" || m.ContentHash != "h" || string(payload) != "bundle:"+string(transcript) {
+		t.Fatalf("migrated session wrong: %+v %q", m, payload)
 	}
 }

@@ -1,115 +1,163 @@
-// Package app holds the push/pull operations shared by the CLI and the GUI,
-// so both front-ends go through exactly the same code path.
+// Package app holds the operations shared by the CLI and the GUI, so both
+// front-ends go through exactly the same code path.
 package app
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
-	"ccsync/internal/session"
-	"ccsync/internal/store"
+	"github.com/vinhvh0809/ccsync/internal/crypto"
+	"github.com/vinhvh0809/ccsync/internal/session"
+	"github.com/vinhvh0809/ccsync/internal/store"
 )
 
-// ActiveGrace is how recently a transcript may have been modified before
-// it counts as live (Claude Code may still be appending to it). The guard
-// is enforced here — not just in front-end code — so no code path can push
-// a half-written session by accident.
+// ActiveGrace is how recently a session may have been modified before it
+// counts as live (Claude Code may still be appending to it). The guard is
+// enforced here — not just in front-end code — so no code path can push a
+// half-written session by accident.
 const ActiveGrace = 30 * time.Second
+
+// pushAttempts bounds retries when other machines keep pushing first.
+const pushAttempts = 3
+
+// beforePush runs between commit and push; tests use it to simulate
+// another machine pushing in that window.
+var beforePush = func() {}
+
+// Unlock syncs the store and returns its key.
+func Unlock(pass string) (*crypto.Key, error) {
+	if err := store.Sync(); err != nil {
+		return nil, err
+	}
+	return store.Unlock(pass)
+}
 
 // Push encrypts the given local sessions into the store and pushes the
 // commit. fallbackCwd is used when a transcript carries no cwd of its own.
 // Sessions modified within ActiveGrace are refused unless force is set;
 // sessions whose content is already in the store are skipped (their ids
 // are returned in skipped) so repeated pushes don't grow the repo.
-func Push(pass string, sessions []session.Session, fallbackCwd string, force bool) (pushed []store.Meta, skipped []string, err error) {
+func Push(key *crypto.Key, sessions []session.Session, fallbackCwd string, force bool) (pushed []store.Meta, skipped []string, err error) {
 	if len(sessions) == 0 {
 		return nil, nil, fmt.Errorf("nothing to push")
 	}
-	if err := store.Sync(); err != nil {
-		return nil, nil, err
-	}
-	if err := store.VerifyPassphrase(pass); err != nil {
-		return nil, nil, err
+	type item struct {
+		meta    store.Meta
+		payload []byte
 	}
 	host, _ := os.Hostname()
+	var items []item
 	for _, s := range sessions {
-		// Stat fresh: the caller's listing may predate new activity.
-		info, err := os.Stat(s.File)
+		// Re-read: the caller's listing may predate new activity.
+		s, err := session.Load(s.File)
 		if err != nil {
 			return nil, nil, err
 		}
-		if time.Since(info.ModTime()) < ActiveGrace && !force {
-			return nil, nil, fmt.Errorf("session %s looks active (modified %s ago) — close it or force the push", s.ID, time.Since(info.ModTime()).Round(time.Second))
+		if age := time.Since(s.Mtime); age < ActiveGrace && !force {
+			return nil, nil, fmt.Errorf("session %s looks active (modified %s ago) — close it or force the push", s.ID, age.Round(time.Second))
 		}
-		data, err := os.ReadFile(s.File)
+		payload, hash, err := session.Bundle(s)
 		if err != nil {
 			return nil, nil, err
-		}
-		sum := sha256.Sum256(data)
-		hash := hex.EncodeToString(sum[:])
-		if existing, found, err := store.GetMeta(pass, s.ID); err == nil && found && existing.ContentHash == hash {
-			skipped = append(skipped, s.ID)
-			continue
 		}
 		cwd := s.Cwd
 		if cwd == "" {
 			cwd = fallbackCwd
 		}
-		meta := store.Meta{
+		items = append(items, item{payload: payload, meta: store.Meta{
 			SessionID:     s.ID,
 			Title:         s.Title,
 			ProjectLabel:  filepath.Base(cwd),
 			OriginalCwd:   cwd,
+			SessionDir:    s.Dir,
 			Hostname:      host,
 			ClaudeVersion: s.Version,
-			SessionMtime:  info.ModTime(),
-			Size:          info.Size(),
+			SessionMtime:  s.Mtime,
+			Size:          s.Size,
 			ContentHash:   hash,
-			PushedAt:      time.Now().UTC(),
-		}
-		if err := store.Put(pass, meta, data); err != nil {
+		}})
+	}
+
+	for attempt := 1; ; attempt++ {
+		if err := store.Sync(); err != nil {
 			return nil, nil, err
 		}
-		pushed = append(pushed, meta)
+		pushed, skipped = nil, nil
+		for _, it := range items {
+			if existing, found, err := store.GetMeta(key, it.meta.SessionID); err == nil && found && existing.ContentHash == it.meta.ContentHash {
+				skipped = append(skipped, it.meta.SessionID)
+				continue
+			}
+			it.meta.PushedAt = time.Now().UTC()
+			if err := store.Put(key, it.meta, it.payload); err != nil {
+				return nil, nil, err
+			}
+			pushed = append(pushed, it.meta)
+		}
+		if len(pushed) == 0 {
+			return nil, skipped, nil
+		}
+		// Commit messages are world-readable on a public remote: no
+		// hostname, no titles — those live only inside the encrypted metadata.
+		if err := store.Commit(fmt.Sprintf("ccsync: push %d session(s)", len(pushed))); err != nil {
+			return nil, nil, err
+		}
+		beforePush()
+		err := store.Push()
+		if err == nil {
+			return pushed, skipped, nil
+		}
+		// The unpushed commit is discarded by the next Sync, so a failure
+		// here can never make a later push report "already up to date".
+		if !errors.Is(err, store.ErrRemoteMoved) || attempt == pushAttempts {
+			return nil, nil, err
+		}
 	}
-	if len(pushed) == 0 {
-		return nil, skipped, nil
-	}
-	// Commit messages are world-readable on a public remote: no hostname,
-	// no titles — those live only inside the encrypted metadata.
-	msg := fmt.Sprintf("ccsync: push %d session(s)", len(pushed))
-	if err := store.Commit(msg); err != nil {
-		return nil, nil, err
-	}
-	return pushed, skipped, nil
 }
 
-// Pull fetches one session by (possibly abbreviated) id, rewrites its
-// structural cwd fields to dest, and installs it locally. It returns the
-// session metadata and the path of the installed transcript.
-func Pull(pass, idPrefix, dest string, force bool) (store.Meta, string, error) {
-	destAbs, err := filepath.Abs(dest)
+// PullResult reports what Pull did.
+type PullResult struct {
+	Meta store.Meta
+	Dest string // resolved project path
+	session.InstallResult
+}
+
+// Pull fetches one session by (possibly abbreviated) id and installs it for
+// the project at dest, relocating its paths there.
+func Pull(key *crypto.Key, idPrefix, dest string, force bool) (PullResult, error) {
+	destAbs, err := session.ResolveProject(dest)
 	if err != nil {
-		return store.Meta{}, "", err
+		return PullResult{}, err
 	}
 	if err := store.Sync(); err != nil {
-		return store.Meta{}, "", err
+		return PullResult{}, err
 	}
-	if err := store.VerifyPassphrase(pass); err != nil {
-		return store.Meta{}, "", err
-	}
-	meta, data, err := store.Get(pass, idPrefix)
+	meta, payload, err := store.Get(key, idPrefix)
 	if err != nil {
-		return store.Meta{}, "", err
+		return PullResult{}, err
 	}
-	data = session.RewriteCwd(data, meta.OriginalCwd, destAbs)
-	target, err := session.Install(meta.SessionID, data, destAbs, force)
+	contents, err := session.Unpack(payload)
 	if err != nil {
-		return store.Meta{}, "", err
+		return PullResult{}, fmt.Errorf("session %s: %w", meta.SessionID, err)
 	}
-	return meta, target, nil
+	res, err := session.Install(meta.SessionID, contents,
+		session.Origin{Cwd: meta.OriginalCwd, SessionDir: meta.SessionDir}, destAbs, force)
+	if errors.Is(err, session.ErrLocalDiffers) {
+		return PullResult{}, fmt.Errorf("%s differs from the store copy (pushed %s from %s) — if the local one is newer, push it instead; to replace it, pull with force (the local copy is kept as a .bak file)",
+			res.Target, meta.PushedAt.Local().Format("2006-01-02 15:04"), meta.Hostname)
+	}
+	if err != nil {
+		return PullResult{}, err
+	}
+	return PullResult{Meta: meta, Dest: destAbs, InstallResult: res}, nil
+}
+
+// Migrate upgrades the store to the current format.
+func Migrate(pass string) (int, error) {
+	return store.Migrate(pass, func(transcript []byte) ([]byte, string, error) {
+		return session.Pack(session.Contents{Transcript: transcript})
+	})
 }
