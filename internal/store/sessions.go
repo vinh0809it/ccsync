@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/vinhvh0809/ccsync/internal/crypto"
-	"github.com/vinhvh0809/ccsync/internal/session"
+	"github.com/vinh-vh/ccsync/internal/crypto"
+	"github.com/vinh-vh/ccsync/internal/session"
 )
 
 // Session ids name directories in the store, which other machines write;

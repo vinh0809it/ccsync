@@ -28,7 +28,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/vinhvh0809/ccsync/internal/crypto"
+	"github.com/vinh-vh/ccsync/internal/crypto"
 )
 
 // Format is the store format this version reads and writes.

@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/vinhvh0809/ccsync/internal/session"
-	"github.com/vinhvh0809/ccsync/internal/store"
+	"github.com/vinh-vh/ccsync/internal/session"
+	"github.com/vinh-vh/ccsync/internal/store"
 )
 
 // ActiveGrace is how recently a session may have been modified before it

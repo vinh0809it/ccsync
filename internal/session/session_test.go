@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vinhvh0809/ccsync/internal/testutil"
+	"github.com/vinh-vh/ccsync/internal/testutil"
 )
 
 func TestSlugForPath(t *testing.T) {

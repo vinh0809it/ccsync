@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vinhvh0809/ccsync/internal/session"
-	"github.com/vinhvh0809/ccsync/internal/testutil"
+	"github.com/vinh-vh/ccsync/internal/session"
+	"github.com/vinh-vh/ccsync/internal/testutil"
 )
 
 const pass = "gui-test-pass"

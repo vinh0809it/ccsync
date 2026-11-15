@@ -11,11 +11,11 @@ even when the project lives at a different path or on another OS.
 
 ## Install
 
-Download a binary from the [releases](https://github.com/vinhvh0809/ccsync/releases)
+Download a binary from the [releases](https://github.com/vinh-vh/ccsync/releases)
 (Linux, macOS, Windows; check it against `SHA256SUMS`), or:
 
 ```sh
-go install github.com/vinhvh0809/ccsync@latest
+go install github.com/vinh-vh/ccsync@latest
 ```
 
 The only runtime dependency is `git`.

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vinhvh0809/ccsync/internal/crypto"
-	"github.com/vinhvh0809/ccsync/internal/testutil"
+	"github.com/vinh-vh/ccsync/internal/crypto"
+	"github.com/vinh-vh/ccsync/internal/testutil"
 )
 
 const pass = "test-passphrase"

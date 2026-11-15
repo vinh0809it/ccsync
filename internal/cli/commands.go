@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vinhvh0809/ccsync/internal/app"
-	"github.com/vinhvh0809/ccsync/internal/gui"
-	"github.com/vinhvh0809/ccsync/internal/session"
-	"github.com/vinhvh0809/ccsync/internal/store"
+	"github.com/vinh-vh/ccsync/internal/app"
+	"github.com/vinh-vh/ccsync/internal/gui"
+	"github.com/vinh-vh/ccsync/internal/session"
+	"github.com/vinh-vh/ccsync/internal/store"
 )
 
 func (c *cli) init(args []string) error {

@@ -20,8 +20,8 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/vinhvh0809/ccsync/internal/app"
-	"github.com/vinhvh0809/ccsync/internal/store"
+	"github.com/vinh-vh/ccsync/internal/app"
+	"github.com/vinh-vh/ccsync/internal/store"
 )
 
 //go:embed index.html

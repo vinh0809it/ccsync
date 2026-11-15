@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vinhvh0809/ccsync/internal/session"
-	"github.com/vinhvh0809/ccsync/internal/testutil"
+	"github.com/vinh-vh/ccsync/internal/session"
+	"github.com/vinh-vh/ccsync/internal/testutil"
 )
 
 // run executes a command line and returns exit code, stdout and stderr.

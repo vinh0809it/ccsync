@@ -1,4 +1,4 @@
-module github.com/vinhvh0809/ccsync
+module github.com/vinh-vh/ccsync
 
 go 1.26.0
 

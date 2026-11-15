@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/vinhvh0809/ccsync/internal/crypto"
+	"github.com/vinh-vh/ccsync/internal/crypto"
 )
 
 // ConvertFunc turns a raw format-1 transcript into a bundle and its hash.
