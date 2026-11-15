@@ -160,7 +160,12 @@ func TestFullFlow(t *testing.T) {
 		t.Fatalf("store = %+v", metas)
 	}
 
-	dest := filepath.Join(t.TempDir(), "webapp")
+	// Pull resolves symlinks and short names (macOS /var, Windows 8.3 temp
+	// paths); compare against the resolved form.
+	dest, err := session.ResolveProject(filepath.Join(t.TempDir(), "webapp"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	var pulled struct {
 		Installed string
 		Unchanged bool
