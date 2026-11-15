@@ -90,6 +90,11 @@ them. Pulling an identical session again is a no-op. If a *different* local
 copy exists, pull refuses; `--force` replaces it and keeps the old one as
 `<id>.jsonl.bak-<unix-time>`.
 
+Not synced: `/rewind` checkpoints (`~/.claude/file-history/<session-id>/`,
+backups of files the session edited, tied to the original machine's paths)
+and other machine-local state outside `projects/`. Resuming and continuing
+the conversation doesn't need them.
+
 ## Security model
 
 - **Encryption:** [age](https://age-encryption.org). A random X25519 store

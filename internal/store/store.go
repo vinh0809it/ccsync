@@ -138,8 +138,10 @@ func git(dir string, args ...string) (string, error) {
 		// A global signing setup would prompt or fail on store commits.
 		"-c", "commit.gpgsign=false"}, args...)
 	cmd := exec.Command("git", full...)
+	// English messages: Push recognizes a lost race by git's wording.
+	cmd.Env = append(os.Environ(), "LC_ALL=C")
 	if NoPrompt {
-		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+		cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0")
 	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -191,10 +193,24 @@ func Init(repoURL, passphrase string) error {
 			return fmt.Errorf("store clone %s tracks %s, not %s — remove that directory (its content lives in the remote) and run init again", dir, current, repoURL)
 		}
 	}
-	// An empty remote has no branch to sync with yet.
 	if _, err := git(dir, "rev-parse", "--verify", "--quiet", "@{u}"); err == nil {
 		if err := Sync(); err != nil {
 			return err
+		}
+	} else {
+		// No upstream: the remote must be empty, and whatever an earlier
+		// init left locally (its first push may have been rejected) never
+		// reached it — start over.
+		heads, err := git(dir, "ls-remote", "--heads", "origin")
+		if err != nil {
+			return err
+		}
+		if heads != "" {
+			return fmt.Errorf("store clone %s is out of step with the remote — remove that directory and run init again", dir)
+		}
+		_, _ = git(dir, "update-ref", "-d", "HEAD")
+		for _, f := range []string{markerFile, checkFile, keyFile} {
+			_ = os.Remove(filepath.Join(dir, f))
 		}
 	}
 
@@ -301,6 +317,10 @@ func Sync() error {
 	}
 	if _, err := git(dir, "fetch", "--quiet", "origin"); err != nil {
 		return err
+	}
+	// Sync discards local changes: be sure this is a ccsync store first.
+	if _, err := git(dir, "cat-file", "-e", "@{u}:"+markerFile); err != nil {
+		return fmt.Errorf("%s does not track a ccsync store (no %s upstream) — check CCSYNC_STORE_DIR or run ccsync init", dir, markerFile)
 	}
 	if _, err := git(dir, "reset", "--hard", "--quiet", "@{u}"); err != nil {
 		return err

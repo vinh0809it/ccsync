@@ -138,6 +138,11 @@ func TestRewriteCwd(t *testing.T) {
 	if string(win) != `{"cwd":"/srv/app\\sub"}` {
 		t.Fatalf("windows subdir: %s", win)
 	}
+	// Destination inside the original project: rewritten exactly once.
+	nested := RewriteCwd([]byte(`{"cwd":"/a/proj"}{"cwd":"/a/proj/sub"}`), "/a/proj", "/a/proj/copy")
+	if string(nested) != `{"cwd":"/a/proj/copy"}{"cwd":"/a/proj/copy/sub"}` {
+		t.Fatalf("nested destination: %s", nested)
+	}
 	if !bytes.Equal(RewriteCwd(data, "", newCwd), data) || !bytes.Equal(RewriteCwd(data, oldCwd, oldCwd), data) {
 		t.Fatal("no-op cases changed data")
 	}

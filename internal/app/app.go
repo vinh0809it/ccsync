@@ -53,8 +53,8 @@ func Push(key *crypto.Key, sessions []session.Session, fallbackCwd string, force
 	for _, s := range sessions {
 		// Re-read: the caller's listing may predate new activity.
 		s, err := session.Load(s.File)
-		if err != nil {
-			return nil, nil, err
+		if err != nil && s.Mtime.IsZero() {
+			return nil, nil, err // unreadable; a parse problem alone still pushes
 		}
 		if age := time.Since(s.Mtime); age < ActiveGrace && !force {
 			return nil, nil, fmt.Errorf("session %s looks active (modified %s ago) — close it or force the push", s.ID, age.Round(time.Second))

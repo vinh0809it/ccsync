@@ -130,7 +130,8 @@ func Unpack(payload []byte) (*Contents, error) {
 			}
 			c.Companion[rel] = data
 		default:
-			return nil, fmt.Errorf("bad bundle: unexpected entry %q", hdr.Name)
+			// Written by a newer ccsync (e.g. a new kind of session state):
+			// skip it rather than refuse the whole session.
 		}
 	}
 	if !seenTranscript {

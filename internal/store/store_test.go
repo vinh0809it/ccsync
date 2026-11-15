@@ -394,3 +394,55 @@ func TestMigrateFromFormat1(t *testing.T) {
 		t.Fatalf("migrated session wrong: %+v %q", m, payload)
 	}
 }
+
+// TestInitRecoversFromFailedFirstPush: when the very first push is
+// rejected (typically bad credentials), init must fail, and a re-run must
+// create the store properly instead of reporting success with nothing on
+// the remote.
+func TestInitRecoversFromFailedFirstPush(t *testing.T) {
+	remote := newRemote(t)
+	bare := strings.TrimPrefix(remote, "file://")
+	marker := filepath.Join(bare, "rejected-once")
+	hook := "#!/bin/sh\n[ -e '" + marker + "' ] && exit 0\ntouch '" + marker + "'\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(bare, "hooks", "pre-receive"), []byte(hook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	machine(t)
+	if err := Init(remote, pass); err == nil {
+		t.Fatal("init must fail when its push is rejected")
+	}
+	key := open(t, remote)
+	if err := Sync(); err != nil {
+		t.Fatalf("store unusable after a failed first init: %v", err)
+	}
+	put(t, key, "abababab-aaaa-bbbb-cccc-000000000001", "x", []byte("x"))
+	if err := Commit("x"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Push(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestSyncRefusesNonStore: Sync resets hard, so it must never run in a
+// directory whose remote isn't a ccsync store.
+func TestSyncRefusesNonStore(t *testing.T) {
+	remote := newRemote(t)
+	bare := strings.TrimPrefix(remote, "file://")
+	work := t.TempDir()
+	for _, args := range [][]string{{"clone", "-q", bare, work}} {
+		exec.Command("git", args...).Run()
+	}
+	os.WriteFile(filepath.Join(work, "precious.txt"), []byte("data"), 0o644)
+	git(work, "add", "-A")
+	git(work, "commit", "-qm", "x")
+	git(work, "push", "-q", "-u", "origin", "HEAD")
+	os.WriteFile(filepath.Join(work, "uncommitted.txt"), []byte("keep me"), 0o644)
+	t.Setenv("CCSYNC_STORE_DIR", work)
+	if err := Sync(); err == nil {
+		t.Fatal("Sync ran in a non-ccsync repo")
+	}
+	if _, err := os.Stat(filepath.Join(work, "uncommitted.txt")); err != nil {
+		t.Fatal("Sync destroyed files in a non-ccsync repo")
+	}
+}

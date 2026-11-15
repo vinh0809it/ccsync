@@ -292,12 +292,26 @@ func RewriteCwd(data []byte, oldCwd, newCwd string) []byte {
 	if oldCwd == "" || oldCwd == newCwd {
 		return data
 	}
-	oldP := `"cwd":"` + jsonString(oldCwd)
-	newP := `"cwd":"` + jsonString(newCwd)
-	for _, end := range []string{`"`, `/`, `\\`} {
-		data = bytes.ReplaceAll(data, []byte(oldP+end), []byte(newP+end))
+	oldP := []byte(`"cwd":"` + jsonString(oldCwd))
+	newP := []byte(`"cwd":"` + jsonString(newCwd))
+	// One pass, so a destination inside the old path is never rewritten
+	// twice.
+	var out bytes.Buffer
+	for {
+		i := bytes.Index(data, oldP)
+		if i < 0 {
+			out.Write(data)
+			return out.Bytes()
+		}
+		rest := data[i+len(oldP):]
+		if bytes.HasPrefix(rest, []byte(`"`)) || bytes.HasPrefix(rest, []byte(`/`)) || bytes.HasPrefix(rest, []byte(`\\`)) {
+			out.Write(data[:i])
+			out.Write(newP)
+		} else {
+			out.Write(data[:i+len(oldP)])
+		}
+		data = rest
 	}
-	return data
 }
 
 // RewritePath replaces every occurrence of the JSON-encoded oldPath with

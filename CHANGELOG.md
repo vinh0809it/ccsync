@@ -25,6 +25,10 @@
   were not atomic. Identical re-pulls are now a no-op; a replaced local copy
   is kept as `<id>.jsonl.bak-<time>`.
 - A global `commit.gpgsign` setting broke store commits.
+- If the first push of `init` was rejected (e.g. bad credentials), re-running
+  `init` reported success with nothing on the remote and the store stayed
+  unusable.
+- A pull into a subdirectory of the original project rewrote cwd twice.
 - The GUI could run two git operations on the store at once.
 
 ### Changed
@@ -33,6 +37,8 @@
 - Sessions are gzipped before encryption (a real 38 MB project stored as
   8 MB).
 - One unreadable store entry no longer hides all the others.
+- Bundles may carry entries a newer ccsync adds; older versions skip them.
+- Git runs with `LC_ALL=C`, and never prompts for credentials from the GUI.
 - Module path is `github.com/vinhvh0809/ccsync` (`go install` works).
 
 ### Added
