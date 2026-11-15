@@ -47,6 +47,15 @@
 - The GUI API accepts only the intended HTTP method per endpoint.
 
 ### Added
+- Push and pull are fast-forward only: by comparing message ids, an outdated
+  copy can no longer overwrite a newer one, and a session continued on two
+  machines is reported instead of silently losing one side. `--force`
+  overrides (pull keeps a backup; push leaves the old copy in git history).
+- `ccsync push --all-projects`, and "All projects" in the GUI. Large pushes
+  are split into commits of at most ~64 MB so memory stays bounded.
+- Native-window apps for Windows, macOS (.app) and Linux (with an installer),
+  built by the release workflow. `ccsync` with no arguments opens the GUI, so
+  every download works on double-click.
 - `ccsync rm` (and a Delete button in the GUI) to remove sessions from the store.
 - `ccsync migrate`, `ccsync version`.
 - CI (gofmt, vet, race tests, govulncheck) and tagged releases with checksums.

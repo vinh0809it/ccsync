@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 # Build distributable ccsync binaries.
 #
-#   ./build/dist.sh            build browser-mode binaries for all platforms
-#   ./build/dist.sh desktop    also build the Linux native-window binary
+#   ./build/dist.sh            browser-mode binaries for all platforms
 #
 # Browser-mode binaries are pure Go (CGO_ENABLED=0): they run on any machine
-# with git, opening the UI in the user's default browser (`ccsync gui`).
-# The Linux desktop binary is a native window but needs webkit2gtk at runtime
-# and can only be built on Linux.
+# with git and open the UI in the default browser. Native-window apps are
+# built per OS by build/desktop.sh.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -46,14 +44,6 @@ build darwin  arm64          # Apple Silicon
 
 # Clean up the windows-only resources so normal `go build` isn't affected.
 rm -f resource*.syso
-
-if [ "${1:-}" = "desktop" ]; then
-  echo "linux native-window binary (needs webkit2gtk at runtime):"
-  PKG_CONFIG_PATH="$PWD/build/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" \
-    go build -tags desktop -trimpath -ldflags "$LDFLAGS" \
-    -o "$OUT/ccsync-${VERSION}-linux-amd64-desktop" .
-  echo "  ccsync-${VERSION}-linux-amd64-desktop"
-fi
 
 (cd "$OUT" && sha256sum ccsync-* > SHA256SUMS)
 

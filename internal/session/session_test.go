@@ -176,11 +176,15 @@ func TestBundleRoundTripAndInstall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload, hash, err := Bundle(s)
+	contents, err := ReadContents(s)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, hash2, _ := Bundle(s); hash2 != hash {
+	payload, hash, err := Pack(contents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, hash2, _ := Pack(contents); hash2 != hash {
 		t.Fatal("bundle hash is not deterministic")
 	}
 	c, err := Unpack(payload)
@@ -216,21 +220,10 @@ func TestBundleRoundTripAndInstall(t *testing.T) {
 		t.Fatal("tool result not installed")
 	}
 
-	// Same content again: no-op. Different local content: refused, then
-	// replaced with a backup under force.
-	if res, err := Install(id, c, Origin{Cwd: cwd, SessionDir: s.Dir}, dest, false); err != nil || !res.Unchanged {
-		t.Fatalf("identical re-install: %+v %v", res, err)
-	}
-	os.WriteFile(res.Target, []byte("local edits\n"), 0o600)
-	if _, err := Install(id, c, Origin{Cwd: cwd}, dest, false); err != ErrLocalDiffers {
-		t.Fatalf("want ErrLocalDiffers, got %v", err)
-	}
-	res2, err := Install(id, c, Origin{Cwd: cwd, SessionDir: s.Dir}, dest, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if b, _ := os.ReadFile(res2.Backup); string(b) != "local edits\n" {
-		t.Fatal("forced install did not keep a backup of the local copy")
+	// Same content again: no-op.
+	res2, err := Install(id, c, Origin{Cwd: cwd, SessionDir: s.Dir}, dest, false)
+	if err != nil || !res2.Unchanged {
+		t.Fatalf("identical re-install: %+v %v", res2, err)
 	}
 	info, _ := os.Stat(res2.Target)
 	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
@@ -247,6 +240,72 @@ func TestUnpackRejectsUnsafeEntries(t *testing.T) {
 		if _, err := Unpack(payload); err == nil {
 			t.Errorf("Unpack accepted %q", rel)
 		}
+	}
+}
+
+// transcript builds a transcript holding conversation entries with the
+// given uuids.
+func transcript(uuids ...string) []byte {
+	var b strings.Builder
+	b.WriteString(testutil.TitleLine("t") + "\n")
+	for _, u := range uuids {
+		b.WriteString(`{"type":"user","uuid":"` + u + `","cwd":"/p"}` + "\n")
+	}
+	return []byte(b.String())
+}
+
+func TestCompare(t *testing.T) {
+	for _, tc := range []struct {
+		a, b []string
+		want Relation
+	}{
+		{[]string{"1", "2"}, []string{"1", "2"}, Same},
+		{[]string{"1", "2", "3"}, []string{"1", "2"}, Ahead},
+		{[]string{"1"}, []string{"1", "2"}, Behind},
+		{[]string{"1", "x"}, []string{"1", "y"}, Diverged},
+	} {
+		if got := Compare(transcript(tc.a...), transcript(tc.b...)); got != tc.want {
+			t.Errorf("Compare(%v, %v) = %v, want %v", tc.a, tc.b, got, tc.want)
+		}
+	}
+	// Relocated paths and metadata lines don't count, only entries.
+	moved := bytes.ReplaceAll(transcript("1", "2"), []byte("/p"), []byte("/elsewhere"))
+	if got := Compare(moved, append(transcript("1", "2"), testutil.TitleLine("renamed")...)); got != Same {
+		t.Errorf("relocated copy = %v, want same", got)
+	}
+}
+
+// TestInstallFastForwardsOnly: a local copy is replaced only when the
+// incoming one has all of its entries; otherwise force is needed, and the
+// local copy is backed up.
+func TestInstallFastForwardsOnly(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	id, dest := "44444444-aaaa-bbbb-cccc-000000000001", "/home/bob/app"
+	incoming := &Contents{Transcript: transcript("1", "2")}
+	install := func(local []byte, force bool) (InstallResult, error) {
+		t.Helper()
+		if local != nil {
+			res, _ := Install(id, &Contents{Transcript: local}, Origin{}, dest, true)
+			os.WriteFile(res.Target, local, 0o600)
+		}
+		return Install(id, incoming, Origin{}, dest, force)
+	}
+
+	if res, err := install(transcript("1"), false); err != nil || !res.Updated || res.Backup != "" {
+		t.Fatalf("older local copy should fast-forward: %+v %v", res, err)
+	}
+	if _, err := install(transcript("1", "2", "3"), false); err != ErrLocalAhead {
+		t.Fatalf("newer local copy: want ErrLocalAhead, got %v", err)
+	}
+	if _, err := install(transcript("1", "x"), false); err != ErrDiverged {
+		t.Fatalf("diverged local copy: want ErrDiverged, got %v", err)
+	}
+	res, err := install(transcript("1", "x"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(res.Backup); !bytes.Equal(b, transcript("1", "x")) {
+		t.Fatal("forced install did not back up the local copy")
 	}
 }
 

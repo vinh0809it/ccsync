@@ -27,7 +27,7 @@ internal/store          the encrypted git store: clone, sync, format, migration
 internal/session        Claude Code's local storage: discovery, bundling, relocation, install
 internal/crypto         age encryption and the passphrase-wrapped store key
 internal/testutil       test helpers: temp git remotes, simulated machines, fixtures
-build/, packaging/      release builds and the Linux desktop installer
+build/, packaging/      release builds: dist.sh (browser binaries), desktop.sh (native apps), macOS bundle, Linux installer
 ```
 
 Dependencies point one way: `cli` → `gui` → `app` → `store` → `session`, `crypto`.

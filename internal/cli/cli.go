@@ -32,7 +32,7 @@ type command struct {
 var commands = []command{
 	{"init", "<git-repo-url>", "set up this machine against a store repo", (*cli).init},
 	{"sessions", "[--project DIR]", "list local sessions of a project", (*cli).sessions},
-	{"push", "[ids...] [--all] [--force] [--project DIR]", "encrypt and push sessions to the store", (*cli).push},
+	{"push", "<ids...> | --all | --all-projects [--force] [--project DIR]", "encrypt and push sessions to the store", (*cli).push},
 	{"ls", "", "list sessions in the store", (*cli).ls},
 	{"pull", "<id> --to DIR [--force]", "install a session for project DIR", (*cli).pull},
 	{"rm", "<id>...", "delete sessions from the store", (*cli).rm},
@@ -56,8 +56,9 @@ func Run(args []string, buildVersion string) int {
 
 func (c *cli) run(args []string) int {
 	if len(args) == 0 {
-		c.usage(c.err)
-		return exitUsage
+		// Double-clicked (or run bare): open the GUI.
+		fmt.Fprintln(c.err, "Opening the ccsync GUI — run `ccsync help` for the commands.")
+		args = []string{"gui"}
 	}
 	name := args[0]
 	switch name {
@@ -89,7 +90,7 @@ func (c *cli) run(args []string) int {
 }
 
 func (c *cli) usage(w io.Writer) {
-	fmt.Fprint(w, "ccsync — sync Claude Code sessions between machines (encrypted git store)\n\nUsage:\n")
+	fmt.Fprint(w, "ccsync — sync Claude Code sessions between machines (encrypted git store)\n\nUsage (with no command, ccsync opens the GUI):\n")
 	for _, cmd := range commands {
 		fmt.Fprintf(w, "  ccsync %-10s %s\n  %12s %s\n", cmd.name, cmd.args, "", cmd.summary)
 	}

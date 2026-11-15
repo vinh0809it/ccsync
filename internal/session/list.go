@@ -116,3 +116,20 @@ func ListProjects() ([]Project, error) {
 	}
 	return out, nil
 }
+
+// ListAll returns the sessions of every project.
+func ListAll() ([]Session, error) {
+	projects, err := ListProjects()
+	if err != nil {
+		return nil, err
+	}
+	var all []Session
+	for _, p := range projects {
+		sessions, err := ListForSlug(p.Slug)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, sessions...)
+	}
+	return all, nil
+}

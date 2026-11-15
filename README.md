@@ -11,14 +11,18 @@ even when the project lives at a different path or on another OS.
 
 ## Install
 
-Download a binary from the [releases](https://github.com/vinh-vh/ccsync/releases)
-(Linux, macOS, Windows; check it against `SHA256SUMS`), or:
+Every machine needs `git` with access to your store repo. Then pick one from
+the [releases](https://github.com/vinh-vh/ccsync/releases) (check downloads
+against `SHA256SUMS`):
 
-```sh
-go install github.com/vinh-vh/ccsync@latest
-```
+| You want | Download | Then |
+|---|---|---|
+| **An app** (native window, double-click) | Windows: `…-windows-amd64-desktop.exe`<br>macOS: `…-macos-arm64.zip`<br>Linux: `…-linux-amd64-desktop.tar.gz` | Windows: run it (Windows 10/11 include the WebView2 it needs).<br>macOS: unzip, move `ccsync.app` to Applications; the first time, right-click → Open (the app is not notarized).<br>Linux: unpack, run `./install.sh` — it adds ccsync to your app menu (needs `webkit2gtk-4.1`). |
+| **A single file**, any OS | `ccsync-<version>-<os>-<arch>` | Run it: with no arguments it opens the GUI in your browser; it is also the full CLI. |
+| **From source** | `go install github.com/vinh-vh/ccsync@latest` | |
 
-The only runtime dependency is `git`.
+The app and the browser GUI do the same things: set up, unlock, push, pull,
+delete.
 
 ## Setup
 
@@ -37,7 +41,8 @@ key or credential helper and never sees or stores credentials.
 ```sh
 ccsync sessions                  # list local sessions of the current project
 ccsync push <id> [<id>...]       # push selected sessions (id prefixes work)
-ccsync push --all                # push all (skips sessions active in the last 30 s)
+ccsync push --all                # push every session of the current project
+ccsync push --all-projects       # push every session of every project
 ccsync ls                        # list what's in the store
 ccsync rm <id>                   # delete a session from the store
 
@@ -46,7 +51,9 @@ ccsync pull <id> --to ~/dev/myproject
 cd ~/dev/myproject && claude --resume <id>
 ```
 
-`--project <dir>` targets a project other than the current directory. The
+`--all` and `--all-projects` skip sessions active in the last 30 seconds
+(Claude Code may still be writing them). `--project <dir>` targets a project
+other than the current directory. The
 passphrase is prompted, or read from `$CCSYNC_PASSPHRASE` for scripting.
 `CCSYNC_CONFIG_DIR` / `CCSYNC_STORE_DIR` override the default locations
 (`~/.config/ccsync`, `~/.local/share/ccsync/store`); `CLAUDE_CONFIG_DIR` is
@@ -55,9 +62,12 @@ honoured like Claude Code does.
 ### GUI
 
 ```sh
-ccsync gui                 # opens the browser UI (setup, unlock, push, pull, delete)
+ccsync                     # same as `ccsync gui`
 ccsync gui --port 8931 --no-open
 ```
+
+Pick a project (or **All projects**), tick sessions, push; pull or delete
+from the store list.
 
 The GUI is served by the same binary on `127.0.0.1` only. Every API request
 requires a random per-run token embedded in the URL it prints, so other local
@@ -87,9 +97,36 @@ of path:
   UUID and so can't match anything else.
 
 Other paths inside message content are left alone; `--resume` doesn't need
-them. Pulling an identical session again is a no-op. If a *different* local
-copy exists, pull refuses; `--force` replaces it and keeps the old one as
-`<id>.jsonl.bak-<unix-time>`.
+them.
+
+## Push, pull and conflicts
+
+ccsync decides like git does with fast-forwards. Claude Code gives every
+message a unique id and only ever appends, so of two copies of a session,
+the newer one contains all the messages of the older one — whatever path it
+was relocated to. ccsync compares those message ids:
+
+| Your copy vs. the other | `push` | `pull` |
+|---|---|---|
+| identical | nothing to do | nothing to do |
+| older (the other has more) | **rejected** — pull instead | updates your copy |
+| newer (you have more) | replaces the store copy | **rejected** — push instead |
+| diverged (both continued) | **rejected** | **rejected** |
+
+Rejected cases need `--force` (in the GUI, a confirmation):
+
+- `push --force` replaces the store copy with yours. The replaced version is
+  not lost — it stays in the store repo's git history.
+- `pull --force` replaces your copy and keeps it as
+  `<id>.jsonl.bak-<unix-time>` next to the session.
+
+So a forgotten, outdated copy can never silently overwrite newer work, and a
+session continued on two machines is always flagged. What ccsync does *not*
+do is merge two diverged copies into one: a conversation is a single thread,
+so you keep one side (the other is in the backup or the git history).
+
+Several machines pushing at the same moment is handled: the push that loses
+the race re-syncs and retries automatically.
 
 Not synced: `/rewind` checkpoints (`~/.claude/file-history/<session-id>/`,
 backups of files the session edited, tied to the original machine's paths)
@@ -112,6 +149,21 @@ the conversation doesn't need them.
   symlinks, regular files only).
 - **Git credentials** are never read or stored; ccsync shells out to `git`.
 
+## Passphrases and multiple stores
+
+- **Forgotten passphrase:** there is no recovery — that is what end-to-end
+  encryption means. Your sessions are still on the machines that have them:
+  create a new store repo, `ccsync init` it with a new passphrase on each
+  machine, and push again.
+- **Several stores** (e.g. work and personal, each with its own passphrase):
+  a machine's setup lives in two directories, so point them elsewhere per
+  store:
+
+  ```sh
+  export CCSYNC_CONFIG_DIR=~/.config/ccsync-work CCSYNC_STORE_DIR=~/.local/share/ccsync-work
+  ccsync init git@github.com:you/work-sessions.git
+  ```
+
 ## Upgrading from 0.1.x
 
 0.2 uses store format 2 (the store key, companion directories, compression).
@@ -133,8 +185,6 @@ entries it can't read; running `ccsync migrate` again converts them.
   rewrites above. Keep Claude Code versions roughly in sync across machines;
   `ccsync ls` doesn't show it, but the stored metadata records which version
   wrote each session.
-- Never resume the *same* session on two machines at once and push both —
-  the last push wins.
 - The git history keeps every pushed version, including sessions removed
   with `ccsync rm`. To reclaim space (or truly erase), start a new store repo
   and push again.
@@ -161,16 +211,15 @@ another machine is retried automatically.
 ```sh
 go build .                    # this platform
 ./build/dist.sh               # browser-mode binaries for all platforms -> dist/
-./build/dist.sh desktop       # also the Linux native-window binary
+./build/desktop.sh            # the native-window app for the OS you run it on
 ```
 
-Browser-mode binaries are pure Go (no CGO). The Linux native-window build
-(`-tags desktop`) uses WebKit and needs `webkit2gtk`;
-`./packaging/linux/install.sh` installs it with an app-menu launcher under
-`~/.local`. Native Windows/macOS windows need a build on those OSes and are
-not set up yet. `VERSION=1.2.3 ./build/dist.sh` stamps a version (by default
-the current git tag); pushing a `v*` tag builds and publishes a GitHub
-release.
+Browser-mode binaries are pure Go (no CGO) and cross-compile. The
+native-window app (`-tags desktop`) uses the OS web view through CGO, so each
+OS builds its own; Linux needs `libwebkit2gtk-4.1-dev` to build. Both scripts
+stamp `$VERSION` (default: the current git tag). Pushing a `v*` tag runs the
+release workflow, which builds everything on Linux, macOS and Windows and
+publishes a GitHub release.
 
 The app icon source is `assets/icon.svg`; regenerate the rasters with:
 
@@ -195,10 +244,11 @@ API flow over HTTP.
 ## Roadmap
 
 - [x] GUI (local web UI served by the binary)
-- [x] Conflict-aware push (retry after another machine pushes)
+- [x] Fast-forward-only push and pull, with retry when machines race
 - [x] `ccsync rm` to delete sessions from the store
+- [x] Native apps for Windows, macOS and Linux
 - [ ] OS keychain caching of the passphrase
-- [ ] Native windows on Windows/macOS (CI build matrix)
+- [ ] Signed/notarized macOS and Windows builds
 
 ## Contributing
 

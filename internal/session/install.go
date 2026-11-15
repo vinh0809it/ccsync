@@ -16,21 +16,30 @@ type Origin struct {
 	SessionDir string // companion directory path
 }
 
-// ErrLocalDiffers means a different local copy of the session exists.
-var ErrLocalDiffers = errors.New("a different local copy of this session exists")
+var (
+	// ErrLocalAhead means the local copy has entries the incoming one lacks.
+	ErrLocalAhead = errors.New("the local copy is newer")
+	// ErrDiverged means the local and incoming copies were both continued.
+	ErrDiverged = errors.New("the local and incoming copies have diverged")
+)
 
 // InstallResult reports what Install did.
 type InstallResult struct {
 	Target    string // installed transcript
-	Backup    string // previous local transcript, when one was replaced
 	Unchanged bool   // the local transcript already matched
+	Updated   bool   // an older local copy was fast-forwarded
+	Backup    string // the local copy, when force replaced one that had entries of its own
 }
 
 // Install writes a session for the project at destPath, rewriting cwd
-// fields and companion-directory references to the new location. An
-// existing local transcript that differs is only replaced when force is
-// set, and is then kept next to it as <id>.jsonl.bak-<unix time>. Each file
-// is written atomically, the transcript last.
+// fields and companion-directory references to the new location.
+//
+// An existing local transcript is replaced only when that loses nothing:
+// when the incoming copy has all of its entries (see Compare). If the local
+// copy is newer or has diverged, Install returns ErrLocalAhead or
+// ErrDiverged — unless force is set, in which case the local copy is kept
+// next to it as <id>.jsonl.bak-<unix time>. Each file is written
+// atomically, the transcript last.
 func Install(id string, c *Contents, from Origin, destPath string, force bool) (InstallResult, error) {
 	if !ValidID(id) {
 		return InstallResult{}, fmt.Errorf("refusing to install session with unsafe id %q", id)
@@ -53,17 +62,25 @@ func Install(id string, c *Contents, from Origin, destPath string, force bool) (
 
 	existing, err := os.ReadFile(res.Target)
 	switch {
-	case err == nil && bytes.Equal(existing, transcript):
-		res.Unchanged = true
-	case err == nil && !force:
-		return res, ErrLocalDiffers
-	case err == nil:
-		res.Backup = fmt.Sprintf("%s.bak-%d", res.Target, time.Now().Unix())
-		if err := writeAtomic(res.Backup, existing); err != nil {
-			return res, err
-		}
-	case !os.IsNotExist(err):
+	case os.IsNotExist(err):
+	case err != nil:
 		return res, err
+	case bytes.Equal(existing, transcript):
+		res.Unchanged = true
+	default:
+		switch rel := Compare(transcript, existing); {
+		case rel == Same || rel == Ahead:
+			res.Updated = true
+		case !force && rel == Behind:
+			return res, ErrLocalAhead
+		case !force:
+			return res, ErrDiverged
+		default:
+			res.Backup = fmt.Sprintf("%s.bak-%d", res.Target, time.Now().Unix())
+			if err := writeAtomic(res.Backup, existing); err != nil {
+				return res, err
+			}
+		}
 	}
 
 	if err := os.MkdirAll(dir, 0o700); err != nil {

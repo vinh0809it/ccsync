@@ -73,15 +73,26 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 	ok(w, projects)
 }
 
+// allProjects is the slug that stands for every project.
+const allProjects = "*"
+
+// localSessions lists one project's sessions, addressed by its on-disk
+// slug (from /api/projects) rather than a path — deriving the slug is lossy
+// for truncated+hashed names — or every project's for allProjects.
+func localSessions(slug string) ([]session.Session, error) {
+	if slug == allProjects {
+		return session.ListAll()
+	}
+	return session.ListForSlug(slug)
+}
+
 func (s *Server) handleLocal(w http.ResponseWriter, r *http.Request) {
-	// Addressed by the on-disk slug (from /api/projects), not by re-deriving
-	// it from a path — derivation is lossy for truncated+hashed slugs.
 	slug := r.URL.Query().Get("slug")
 	if slug == "" {
 		fail(w, http.StatusBadRequest, fmt.Errorf("slug query param is required"))
 		return
 	}
-	sessions, err := session.ListForSlug(slug)
+	sessions, err := localSessions(slug)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err)
 		return
@@ -119,16 +130,17 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Slug    string   `json:"slug"`
-		Project string   `json:"project"` // display path; fallback cwd only
-		IDs     []string `json:"ids"`
-		Force   bool     `json:"force"`
+		Slug      string   `json:"slug"`
+		Project   string   `json:"project"` // display path; fallback cwd only
+		IDs       []string `json:"ids"`
+		Force     bool     `json:"force"`     // include active sessions
+		Overwrite bool     `json:"overwrite"` // replace newer or diverged store copies
 	}
 	if err := decode(r, &req); err != nil || req.Slug == "" || len(req.IDs) == 0 {
 		fail(w, http.StatusBadRequest, fmt.Errorf("slug and ids are required"))
 		return
 	}
-	locals, err := session.ListForSlug(req.Slug)
+	locals, err := localSessions(req.Slug)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err)
 		return
@@ -150,12 +162,22 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 			selected = append(selected, s)
 		}
 	}
-	res, err := s.client.Push(selected, req.Project, req.Force)
+	res, err := s.client.Push(selected, req.Project, app.PushOptions{IncludeActive: req.Force, Overwrite: req.Overwrite})
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err)
 		return
 	}
-	ok(w, map[string]any{"pushed": len(res.Pushed), "skipped": len(res.Skipped)})
+	type rejection struct {
+		ID       string `json:"id"`
+		Title    string `json:"title"`
+		Relation string `json:"relation"` // "behind" or "diverged"
+		Host     string `json:"host"`
+	}
+	rejected := make([]rejection, 0, len(res.Rejected))
+	for _, r := range res.Rejected {
+		rejected = append(rejected, rejection{r.Local.ID, r.Local.Title, r.Relation.String(), r.Store.Hostname})
+	}
+	ok(w, map[string]any{"pushed": len(res.Pushed), "skipped": len(res.Skipped), "rejected": rejected})
 }
 
 func (s *Server) handlePull(w http.ResponseWriter, r *http.Request) {
@@ -181,6 +203,7 @@ func (s *Server) handlePull(w http.ResponseWriter, r *http.Request) {
 		"installed": res.Target,
 		"backup":    res.Backup,
 		"unchanged": res.Unchanged,
+		"updated":   res.Updated,
 		"resume":    res.ResumeCommand(),
 	})
 }

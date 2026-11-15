@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,10 +54,10 @@ func TestPushRefusesActiveUnlessForced(t *testing.T) {
 	now := time.Now()
 	os.Chtimes(s.File, now, now)
 
-	if _, err := c.Push([]session.Session{s}, "", false); err == nil || !strings.Contains(err.Error(), "active") {
+	if _, err := c.Push([]session.Session{s}, "", PushOptions{}); err == nil || !strings.Contains(err.Error(), "active") {
 		t.Fatalf("push of an active session must be refused, got %v", err)
 	}
-	if res, err := c.Push([]session.Session{s}, "", true); err != nil || len(res.Pushed) != 1 {
+	if res, err := c.Push([]session.Session{s}, "", PushOptions{IncludeActive: true}); err != nil || len(res.Pushed) != 1 {
 		t.Fatalf("forced push: %+v %v", res, err)
 	}
 }
@@ -65,14 +66,14 @@ func TestPushSkipsUnchangedContent(t *testing.T) {
 	m, c := machine(t, testutil.Remote(t))
 	s := localSession(t, m, "77777777-aaaa-bbbb-cccc-000000000002")
 
-	if res, err := c.Push([]session.Session{s}, "", false); err != nil || len(res.Pushed) != 1 {
+	if res, err := c.Push([]session.Session{s}, "", PushOptions{}); err != nil || len(res.Pushed) != 1 {
 		t.Fatalf("first push: %+v %v", res, err)
 	}
-	if res, err := c.Push([]session.Session{s}, "", false); err != nil || len(res.Pushed) != 0 || len(res.Skipped) != 1 {
+	if res, err := c.Push([]session.Session{s}, "", PushOptions{}); err != nil || len(res.Pushed) != 0 || len(res.Skipped) != 1 {
 		t.Fatalf("re-push: %+v %v", res, err)
 	}
 	testutil.WriteFile(t, s.File, testutil.CwdLine(project)+"\n"+`{"more":"data"}`+"\n")
-	if res, err := c.Push([]session.Session{s}, "", false); err != nil || len(res.Pushed) != 1 {
+	if res, err := c.Push([]session.Session{s}, "", PushOptions{}); err != nil || len(res.Pushed) != 1 {
 		t.Fatalf("push after change: %+v %v", res, err)
 	}
 }
@@ -86,10 +87,10 @@ func TestFailedPushIsRetriedNotSkipped(t *testing.T) {
 	testutil.RejectFirstPush(t, remote)
 	s := localSession(t, m, "88888888-aaaa-bbbb-cccc-000000000001")
 
-	if _, err := c.Push([]session.Session{s}, "", false); err == nil {
+	if _, err := c.Push([]session.Session{s}, "", PushOptions{}); err == nil {
 		t.Fatal("first push should fail (remote rejects it)")
 	}
-	if res, err := c.Push([]session.Session{s}, "", false); err != nil || len(res.Pushed) != 1 {
+	if res, err := c.Push([]session.Session{s}, "", PushOptions{}); err != nil || len(res.Pushed) != 1 {
 		t.Fatalf("second push: %+v %v", res, err)
 	}
 	if !strings.Contains(testutil.RemoteFiles(t, remote), s.ID) {
@@ -114,13 +115,13 @@ func TestPushRetriesWhenAnotherMachinePushesFirst(t *testing.T) {
 		raced = true
 		b.Use(t)
 		defer a.Use(t)
-		if _, err := clientB.Push([]session.Session{sb}, "", false); err != nil {
+		if _, err := clientB.Push([]session.Session{sb}, "", PushOptions{}); err != nil {
 			t.Errorf("machine B push: %v", err)
 		}
 	}
 	t.Cleanup(func() { beforePush = func() {} })
 
-	if res, err := clientA.Push([]session.Session{sa}, "", false); err != nil || len(res.Pushed) != 1 || !raced {
+	if res, err := clientA.Push([]session.Session{sa}, "", PushOptions{}); err != nil || len(res.Pushed) != 1 || !raced {
 		t.Fatalf("push A: %+v raced=%v err=%v", res, raced, err)
 	}
 	files := testutil.RemoteFiles(t, remote)
@@ -142,7 +143,7 @@ func TestPullRelocatesWholeSession(t *testing.T) {
 	s := localSession(t, a, id,
 		testutil.CwdLine(project+"/api"),
 		`{"content":"saved to: `+testutil.JSONString(filepath.Join(sdir, "tool-results", "r.txt"))+`"}`)
-	if _, err := clientA.Push([]session.Session{s}, "", false); err != nil {
+	if _, err := clientA.Push([]session.Session{s}, "", PushOptions{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -179,7 +180,7 @@ func TestRemove(t *testing.T) {
 	remote := testutil.Remote(t)
 	m, c := machine(t, remote)
 	s := localSession(t, m, "bbbbbbbb-aaaa-bbbb-cccc-000000000001")
-	if _, err := c.Push([]session.Session{s}, "", false); err != nil {
+	if _, err := c.Push([]session.Session{s}, "", PushOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := c.Remove([]string{"ffffffff"}); err == nil {
@@ -201,5 +202,75 @@ func TestResumeCommandQuotes(t *testing.T) {
 	r := PullResult{Dest: "/home/a/my project", Meta: store.Meta{SessionID: "x"}}
 	if got := r.ResumeCommand(); got != "cd '/home/a/my project' && claude --resume x" && got != `cd "/home/a/my project" && claude --resume x` {
 		t.Fatalf("ResumeCommand = %s", got)
+	}
+}
+
+// TestPushIsFastForwardOnly plays the git-like scenarios: an outdated copy
+// can't overwrite a newer one, and a session continued on two machines is
+// rejected until forced.
+func TestPushIsFastForwardOnly(t *testing.T) {
+	remote := testutil.Remote(t)
+	id := "dddddddd-aaaa-bbbb-cccc-000000000001"
+	a, clientA := machine(t, remote)
+	sa := localSession(t, a, id, `{"type":"user","uuid":"u1"}`)
+	if _, err := clientA.Push([]session.Session{sa}, "", PushOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	// B pulls it, continues it, pushes: a fast-forward.
+	_, clientB := machine(t, remote)
+	dest := filepath.Join(t.TempDir(), "webapp")
+	pulled, err := clientB.Pull(id, dest, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendLine(t, pulled.Target, `{"type":"user","uuid":"u2"}`)
+	sb, _ := session.Load(pulled.Target)
+	if res, err := clientB.Push([]session.Session{sb}, "", PushOptions{}); err != nil || len(res.Pushed) != 1 {
+		t.Fatalf("B fast-forward push: %+v %v", res, err)
+	}
+
+	// A still has the old copy: pushing it would drop u2.
+	a.Use(t)
+	res, err := clientA.Push([]session.Session{sa}, "", PushOptions{})
+	if err != nil || len(res.Rejected) != 1 || res.Rejected[0].Relation != session.Behind {
+		t.Fatalf("outdated push: %+v %v", res, err)
+	}
+	// A continues its old copy too: now the copies have diverged.
+	appendLine(t, sa.File, `{"type":"user","uuid":"u3"}`)
+	res, err = clientA.Push([]session.Session{sa}, "", PushOptions{})
+	if err != nil || len(res.Rejected) != 1 || res.Rejected[0].Relation != session.Diverged {
+		t.Fatalf("diverged push: %+v %v", res, err)
+	}
+	if res, err = clientA.Push([]session.Session{sa}, "", PushOptions{Overwrite: true}); err != nil || len(res.Pushed) != 1 {
+		t.Fatalf("forced push: %+v %v", res, err)
+	}
+}
+
+// appendLine appends a transcript line and backdates the file so the
+// session doesn't count as active.
+func appendLine(t *testing.T, file, line string) {
+	t.Helper()
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testutil.WriteFile(t, file, string(data)+line+"\n")
+}
+
+func TestBatches(t *testing.T) {
+	s := func(size int64) session.Session { return session.Session{Size: size} }
+	got := batches([]session.Session{s(40), s(30), s(100), s(10), s(10)}, 64)
+	var sizes [][]int64
+	for _, b := range got {
+		var row []int64
+		for _, x := range b {
+			row = append(row, x.Size)
+		}
+		sizes = append(sizes, row)
+	}
+	want := "[[40] [30] [100] [10 10]]"
+	if fmt.Sprint(sizes) != want {
+		t.Fatalf("batches = %v, want %s", sizes, want)
 	}
 }

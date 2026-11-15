@@ -41,9 +41,12 @@ func (c *Client) Pull(idPrefix, dest string, force bool) (PullResult, error) {
 	}
 	res, err := session.Install(meta.SessionID, contents,
 		session.Origin{Cwd: meta.OriginalCwd, SessionDir: meta.SessionDir}, destAbs, force)
-	if errors.Is(err, session.ErrLocalDiffers) {
-		return PullResult{}, fmt.Errorf("%s differs from the store copy (pushed %s from %s) — if the local one is newer, push it instead; to replace it, pull with force (the local copy is kept as a .bak file)",
-			res.Target, meta.PushedAt.Local().Format("2006-01-02 15:04"), meta.Hostname)
+	switch {
+	case errors.Is(err, session.ErrLocalAhead):
+		return PullResult{}, fmt.Errorf("the local copy of %s has messages the store copy lacks — push it instead, or pull with force to replace it (the local copy is kept as a .bak file)", meta.SessionID)
+	case errors.Is(err, session.ErrDiverged):
+		return PullResult{}, fmt.Errorf("%s was continued both here and on %s (pushed %s) — pull with force to take the store copy (the local copy is kept as a .bak file), or push with force to keep yours",
+			meta.SessionID, meta.Hostname, meta.PushedAt.Local().Format("2006-01-02 15:04"))
 	}
 	if err != nil {
 		return PullResult{}, err

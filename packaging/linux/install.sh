@@ -3,15 +3,25 @@
 # native-window binary, the icon, and a .desktop launcher into ~/.local so
 # ccsync shows up in the application menu with its icon. No root needed.
 #
-# Usage: ./packaging/linux/install.sh [path-to-desktop-binary]
+# Usage: ./install.sh                    (from an unpacked release archive)
+#        ./packaging/linux/install.sh [path-to-desktop-binary]   (from the repo)
 set -euo pipefail
-cd "$(dirname "$0")/../.."
+HERE=$(cd "$(dirname "$0")" && pwd)
 
-BIN="${1:-}"
-if [ -z "$BIN" ]; then
-  BIN=$(ls dist/ccsync-*-linux-amd64-desktop 2>/dev/null | head -1 || true)
+if [ -f "$HERE/ccsync" ]; then
+  # Unpacked release archive: binary and icon sit next to this script.
+  BIN="$HERE/ccsync"
+  ICON="$HERE/icon.png"
+else
+  # Repository checkout.
+  cd "$HERE/../.."
+  ICON=assets/icon-256.png
+  BIN="${1:-}"
+  if [ -z "$BIN" ]; then
+    BIN=$(ls dist/ccsync-*-linux-*-desktop 2>/dev/null | head -1 || true)
+  fi
 fi
-[ -n "$BIN" ] && [ -f "$BIN" ] || { echo "desktop binary not found; run: ./build/dist.sh desktop"; exit 1; }
+[ -n "$BIN" ] && [ -f "$BIN" ] || { echo "desktop binary not found; run: ./build/desktop.sh"; exit 1; }
 
 APPS="$HOME/.local/share/applications"
 ICONS="$HOME/.local/share/icons/hicolor/256x256/apps"
@@ -19,14 +29,14 @@ BINDIR="$HOME/.local/bin"
 mkdir -p "$APPS" "$ICONS" "$BINDIR"
 
 install -m755 "$BIN" "$BINDIR/ccsync"
-install -m644 assets/icon-256.png "$ICONS/ccsync.png"
+install -m644 "$ICON" "$ICONS/ccsync.png"
 
 cat > "$APPS/ccsync.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=ccsync
 Comment=Sync Claude Code sessions via an encrypted git store
-Exec=$BINDIR/ccsync gui
+Exec=$BINDIR/ccsync
 Icon=ccsync
 Terminal=false
 Categories=Development;Utility;

@@ -24,9 +24,6 @@ func TestUsageAndExitCodes(t *testing.T) {
 	if code, out, _ := run(t, "--help"); code != exitOK || !strings.Contains(out, "ccsync rm") {
 		t.Fatalf("help: code=%d out=%q", code, out)
 	}
-	if code, _, _ := run(t); code != exitUsage {
-		t.Fatalf("no args: code=%d", code)
-	}
 	if code, _, errOut := run(t, "frobnicate"); code != exitUsage || !strings.Contains(errOut, "unknown command") {
 		t.Fatalf("unknown: code=%d err=%q", code, errOut)
 	}
@@ -75,7 +72,7 @@ func TestCommandsEndToEnd(t *testing.T) {
 	if out := mustRun(t, "sessions", "--project", project); !strings.Contains(out, "cli-flow") {
 		t.Fatalf("sessions: %q", out)
 	}
-	if out := mustRun(t, "push", "cccc", "--project", project); !strings.Contains(out, "pushed 1, skipped 0") {
+	if out := mustRun(t, "push", "cccc", "--project", project); !strings.Contains(out, "pushed 1, already up to date 0, rejected 0") {
 		t.Fatalf("push: %q", out)
 	}
 

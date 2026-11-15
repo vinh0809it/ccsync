@@ -113,7 +113,7 @@ func TestFullFlow(t *testing.T) {
 	project := "/home/alice/webapp"
 	id := "66666666-aaaa-bbbb-cccc-000000000001"
 	testutil.WriteSession(t, e.machine.Claude, session.SlugForPath(project), id,
-		testutil.TitleLine("gui-flow"), testutil.CwdLine(project))
+		testutil.TitleLine("gui-flow"), testutil.CwdLine(project), `{"type":"user","uuid":"u1"}`)
 	e.start(t)
 
 	var state struct{ Configured, Unlocked bool }
@@ -180,12 +180,13 @@ func TestFullFlow(t *testing.T) {
 	if !pulled.Unchanged {
 		t.Fatal("identical re-pull should report unchanged")
 	}
-	// A diverged local copy is refused without force, replaced with a
-	// backup with it.
-	os.WriteFile(pulled.Installed, []byte("diverged\n"), 0o600)
+	// A local copy continued here (an entry the store lacks) is refused
+	// without force, and replaced with a backup with it.
+	diverged := string(data) + `{"type":"user","uuid":"local-only"}` + "\n"
+	os.WriteFile(pulled.Installed, []byte(diverged), 0o600)
 	e.call(t, "POST", "/api/pull", map[string]any{"id": id, "dest": dest}, false)
 	json.Unmarshal(e.call(t, "POST", "/api/pull", map[string]any{"id": id, "dest": dest, "force": true}, true), &pulled)
-	if b, _ := os.ReadFile(pulled.Backup); string(b) != "diverged\n" {
+	if b, _ := os.ReadFile(pulled.Backup); string(b) != diverged {
 		t.Fatal("forced pull did not back up the local copy")
 	}
 

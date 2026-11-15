@@ -29,26 +29,24 @@ type Contents struct {
 	Companion  map[string][]byte // slash-separated path relative to the companion dir
 }
 
-// Bundle packs a local session. The hash covers the uncompressed tar,
-// which is deterministic (sorted names, fixed modes and times), so an
-// unchanged session always hashes the same.
-func Bundle(s Session) (payload []byte, hash string, err error) {
+// ReadContents reads a local session's transcript and companion files.
+func ReadContents(s Session) (Contents, error) {
 	c := Contents{Companion: map[string][]byte{}}
+	var err error
 	if c.Transcript, err = os.ReadFile(s.File); err != nil {
-		return nil, "", err
+		return Contents{}, err
 	}
 	err = walkCompanion(s.Dir, func(rel string, _ os.FileInfo) error {
 		data, err := os.ReadFile(filepath.Join(s.Dir, filepath.FromSlash(rel)))
 		c.Companion[rel] = data
 		return err
 	})
-	if err != nil {
-		return nil, "", err
-	}
-	return Pack(c)
+	return c, err
 }
 
-// Pack builds a bundle from contents.
+// Pack builds a bundle from contents. The hash covers the uncompressed
+// tar, which is deterministic (sorted names, fixed modes and times), so
+// unchanged contents always hash the same.
 func Pack(c Contents) (payload []byte, hash string, err error) {
 	var tarBuf bytes.Buffer
 	tw := tar.NewWriter(&tarBuf)

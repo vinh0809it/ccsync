@@ -351,7 +351,7 @@
     <label>Install for project directory <span class="muted">(Claude Code creates it if missing)</span></label>
     <input id="pullDest" type="text" class="mono">
     <label class="selall" style="margin-top:12px">
-      <input type="checkbox" id="pullForce"> replace a different local copy (it is kept as a .bak file)</label>
+      <input type="checkbox" id="pullForce"> replace a local copy that is newer or was continued here (it is kept as a .bak file)</label>
     <div id="pullDone" class="donebox hidden"></div>
   </div>
   <div class="dlg-foot">
@@ -460,8 +460,10 @@ async function loadProjects() {
     const projects = (await api('/api/projects'))
       .sort((a, b) => new Date(b.LastUsed) - new Date(a.LastUsed));
     projectsBySlug = Object.fromEntries(projects.map(p => [p.Slug, p]));
+    const total = projects.reduce((n, p) => n + p.Sessions, 0);
     sel.innerHTML = projects.map(p =>
-      `<option value="${esc(p.Slug)}">${esc(p.Path || p.Slug)}  ·  ${p.Sessions} session(s)</option>`).join('');
+      `<option value="${esc(p.Slug)}">${esc(p.Path || p.Slug)}  ·  ${p.Sessions} session(s)</option>`).join('') +
+      (projects.length > 1 ? `<option value="*">All projects  ·  ${total} session(s)</option>` : '');
   } catch (e) { toast(e.message, true); }
 }
 
@@ -485,7 +487,8 @@ function localVisible() {
   const q = document.getElementById('localSearch').value.trim().toLowerCase();
   if (!q) return localRows;
   return localRows.filter(s =>
-    (s.Title || '').toLowerCase().includes(q) || s.ID.toLowerCase().includes(q));
+    (s.Title || '').toLowerCase().includes(q) || s.ID.toLowerCase().includes(q) ||
+    (s.Cwd || '').toLowerCase().includes(q));
 }
 
 function renderLocal() {
@@ -502,7 +505,7 @@ function renderLocal() {
         <div class="main">
           <div class="ttl"><span class="name">${esc(s.Title) || '<span class="muted">(untitled)</span>'}</span>
             ${s.Active ? '<span class="badge active">active</span>' : ''}</div>
-          <div class="sub mono">${esc(short(s.ID))}</div>
+          <div class="sub mono">${esc(short(s.ID))}${allProjectsMode() && s.Cwd ? ' · ' + esc(s.Cwd) : ''}</div>
         </div>
         <div class="side"><div class="t">${when(s.Mtime)}</div><div class="s">${size(s.Size)}</div></div>
       </div>`).join('');
@@ -549,8 +552,10 @@ function doPush() {
   document.getElementById('pushDlg').showModal();
 }
 
-async function confirmPush() {
-  const chosen = localRows.filter(s => selected.has(s.ID));
+function allProjectsMode() { return document.getElementById('projectSel').value === '*'; }
+
+async function confirmPush(overwrite = false, ids = null) {
+  const chosen = localRows.filter(s => (ids ? ids.includes(s.ID) : selected.has(s.ID)));
   const force = chosen.some(s => s.Active);
   busy('pushGo', 'pushSpin', true, 'pushGoLbl', 'Pushing…', 'Push');
   document.getElementById('pushStatus').textContent = 'Encrypting & pushing…';
@@ -558,12 +563,21 @@ async function confirmPush() {
     const slug = document.getElementById('projectSel').value;
     const r = await api('/api/push', {
       slug, project: (projectsBySlug[slug] || {}).Path || '',
-      ids: chosen.map(s => s.ID), force,
+      ids: chosen.map(s => s.ID), force, overwrite,
     });
     document.getElementById('pushDlg').close();
     selected.clear();
-    toast(`Pushed ${r.pushed} session(s)` + (r.skipped ? `, ${r.skipped} already up to date` : ''));
+    toast(`Pushed ${r.pushed} session(s)` + (r.skipped ? `, ${r.skipped} already up to date` : '') +
+      (r.rejected.length ? `, ${r.rejected.length} not pushed` : ''), r.rejected.length > 0);
     loadStore();
+    if (r.rejected.length) {
+      const lines = r.rejected.map(x => `• ${x.title || short(x.id)} — ` + (x.relation === 'behind'
+        ? `the store has a newer copy (from ${x.host})` : `it was also continued on ${x.host}`));
+      const msg = 'These sessions were not pushed, because the store copy has messages yours lacks:\n\n' +
+        lines.join('\n') + '\n\nPull them instead, or overwrite the store copy with yours? ' +
+        '(The overwritten version stays in the repo\'s git history.)';
+      if (confirm(msg)) { busy('pushGo', 'pushSpin', false, 'pushGoLbl', 'Pushing…', 'Push'); return confirmPush(true, r.rejected.map(x => x.id)); }
+    }
   } catch (e) {
     document.getElementById('pushStatus').textContent = '';
     toast(e.message, true);
@@ -652,6 +666,7 @@ async function doPull() {
     });
     const done = document.getElementById('pullDone');
     const what = r.unchanged ? 'Already up to date.'
+      : r.updated ? 'Updated to the newer store copy.'
       : r.backup ? `Installed (previous local copy kept as <code>${esc(r.backup)}</code>).`
       : 'Installed.';
     done.innerHTML = what + ' Resume with:<br><code class="copy" title="click to copy" ' +

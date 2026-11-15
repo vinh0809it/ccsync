@@ -74,36 +74,43 @@ func (c *cli) push(args []string) error {
 	fs := flag.NewFlagSet("push", flag.ContinueOnError)
 	proj := projectFlag(fs)
 	all := fs.Bool("all", false, "push every session of the project")
-	force := fs.Bool("force", false, "include sessions that look active")
+	allProjects := fs.Bool("all-projects", false, "push every session of every project")
+	force := fs.Bool("force", false, "include active sessions and overwrite store copies that are newer or diverged")
 	if err := c.parseFlags(fs, args, "project"); err != nil {
 		return err
 	}
-	if *all == (fs.NArg() > 0) {
-		return fmt.Errorf("%w: pass session ids (see: ccsync sessions) or --all", errUsage)
+	modes := 0
+	for _, on := range []bool{*all, *allProjects, fs.NArg() > 0} {
+		if on {
+			modes++
+		}
 	}
-	p, err := resolveProject(*proj)
-	if err != nil {
-		return err
+	if modes != 1 {
+		return fmt.Errorf("%w: pass session ids (see: ccsync sessions), --all or --all-projects", errUsage)
 	}
 	if _, err := store.LoadConfig(); err != nil {
 		return err
 	}
-	locals, err := session.ListForProject(p)
+
+	var p string
+	var selected []session.Session
+	var err error
+	if *allProjects {
+		selected, err = session.ListAll()
+	} else {
+		if p, err = resolveProject(*proj); err != nil {
+			return err
+		}
+		selected, err = session.ListForProject(p)
+		if err == nil && !*all {
+			selected, err = selectSessions(selected, fs.Args())
+		}
+	}
 	if err != nil {
 		return err
 	}
-
-	var selected []session.Session
-	if *all {
-		for _, s := range locals {
-			if time.Since(s.Mtime) < app.ActiveGrace && !*force {
-				fmt.Fprintf(c.err, "skipping %s (active session; --force to include)\n", s.ID)
-				continue
-			}
-			selected = append(selected, s)
-		}
-	} else if selected, err = selectSessions(locals, fs.Args()); err != nil {
-		return err
+	if *all || *allProjects {
+		selected = c.dropActive(selected, *force)
 	}
 	if len(selected) == 0 {
 		return fmt.Errorf("nothing to push")
@@ -113,18 +120,46 @@ func (c *cli) push(args []string) error {
 	if err != nil {
 		return err
 	}
-	res, err := client.Push(selected, p, *force)
+	res, err := client.Push(selected, p, app.PushOptions{IncludeActive: *force, Overwrite: *force})
+	for _, m := range res.Pushed {
+		fmt.Fprintf(c.out, "pushed   %s  %s\n", m.SessionID, title(m.Title))
+	}
+	for _, r := range res.Rejected {
+		fmt.Fprintf(c.out, "rejected %s  %s — %s\n", r.Local.ID, title(r.Local.Title), rejectionReason(r))
+	}
 	if err != nil {
 		return err
 	}
-	for _, m := range res.Pushed {
-		fmt.Fprintf(c.out, "pushed %s (%s)\n", m.SessionID, title(m.Title))
+	fmt.Fprintf(c.out, "pushed %d, already up to date %d, rejected %d.\n", len(res.Pushed), len(res.Skipped), len(res.Rejected))
+	if len(res.Rejected) > 0 {
+		return fmt.Errorf("%d session(s) not pushed: pull them first, or push with --force to overwrite the store copy (it stays in the store's git history)", len(res.Rejected))
 	}
-	for _, id := range res.Skipped {
-		fmt.Fprintf(c.out, "skipped %s (already up to date in the store)\n", id)
-	}
-	fmt.Fprintf(c.out, "pushed %d, skipped %d.\n", len(res.Pushed), len(res.Skipped))
 	return nil
+}
+
+func rejectionReason(r app.Rejection) string {
+	from := fmt.Sprintf("pushed from %s %s", r.Store.Hostname, r.Store.PushedAt.Local().Format("2006-01-02 15:04"))
+	if r.Relation == session.Behind {
+		return "the store copy is newer (" + from + ")"
+	}
+	return "it was also continued elsewhere (" + from + ")"
+}
+
+// dropActive leaves out sessions modified within app.ActiveGrace, unless
+// include is set.
+func (c *cli) dropActive(sessions []session.Session, include bool) []session.Session {
+	if include {
+		return sessions
+	}
+	kept := sessions[:0:0]
+	for _, s := range sessions {
+		if time.Since(s.Mtime) < app.ActiveGrace {
+			fmt.Fprintf(c.err, "skipping %s (active session; --force to include)\n", s.ID)
+			continue
+		}
+		kept = append(kept, s)
+	}
+	return kept
 }
 
 // selectSessions resolves id prefixes against local sessions.
@@ -187,7 +222,7 @@ func (c *cli) ls(args []string) error {
 func (c *cli) pull(args []string) error {
 	fs := flag.NewFlagSet("pull", flag.ContinueOnError)
 	to := fs.String("to", "", "project directory to install the session for (required)")
-	force := fs.Bool("force", false, "replace a different local copy (kept as a .bak file)")
+	force := fs.Bool("force", false, "replace a local copy that is newer or diverged (kept as a .bak file)")
 	if err := c.parseFlags(fs, args, "to"); err != nil {
 		return err
 	}
@@ -205,6 +240,8 @@ func (c *cli) pull(args []string) error {
 	switch {
 	case res.Unchanged:
 		fmt.Fprintf(c.out, "already up to date: %s\n", res.Target)
+	case res.Updated:
+		fmt.Fprintf(c.out, "updated %s\n", res.Target)
 	case res.Backup != "":
 		fmt.Fprintf(c.out, "installed %s\n(previous local copy kept as %s)\n", res.Target, res.Backup)
 	default:
