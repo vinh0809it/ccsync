@@ -6,7 +6,6 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -145,103 +144,4 @@ func Unpack(payload []byte) (*Contents, error) {
 func safeRel(rel string) bool {
 	return rel != "" && path.Clean(rel) == rel && !strings.Contains(rel, `\`) &&
 		!strings.Contains(rel, ":") && filepath.IsLocal(filepath.FromSlash(rel))
-}
-
-// Origin is where a session lived on the machine that pushed it.
-type Origin struct {
-	Cwd        string // project path
-	SessionDir string // companion directory path
-}
-
-// ErrLocalDiffers means a different local copy of the session exists.
-var ErrLocalDiffers = errors.New("a different local copy of this session exists")
-
-// InstallResult reports what Install did.
-type InstallResult struct {
-	Target    string // installed transcript
-	Backup    string // previous local transcript, when one was replaced
-	Unchanged bool   // the local transcript already matched
-}
-
-// Install writes a session for the project at destPath, rewriting cwd
-// fields and companion-directory references to the new location. An
-// existing local transcript that differs is only replaced when force is
-// set, and is then kept next to it as <id>.jsonl.bak-<unix time>. Each file
-// is written atomically, the transcript last.
-func Install(id string, c *Contents, from Origin, destPath string, force bool) (InstallResult, error) {
-	if !ValidID(id) {
-		return InstallResult{}, fmt.Errorf("refusing to install session with unsafe id %q", id)
-	}
-	claudeDir, err := ClaudeDir()
-	if err != nil {
-		return InstallResult{}, err
-	}
-	dir, err := projectDir(claudeDir, destPath)
-	if err != nil {
-		return InstallResult{}, err
-	}
-	res := InstallResult{Target: filepath.Join(dir, id+".jsonl")}
-	sessionDir := filepath.Join(dir, id)
-
-	relocate := func(b []byte) []byte {
-		return RewritePath(RewriteCwd(b, from.Cwd, destPath), from.SessionDir, sessionDir)
-	}
-	transcript := relocate(c.Transcript)
-
-	existing, err := os.ReadFile(res.Target)
-	switch {
-	case err == nil && bytes.Equal(existing, transcript):
-		res.Unchanged = true
-	case err == nil && !force:
-		return res, ErrLocalDiffers
-	case err == nil:
-		res.Backup = fmt.Sprintf("%s.bak-%d", res.Target, time.Now().Unix())
-		if err := writeAtomic(res.Backup, existing); err != nil {
-			return res, err
-		}
-	case !os.IsNotExist(err):
-		return res, err
-	}
-
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return res, err
-	}
-	for rel, data := range c.Companion {
-		if strings.HasSuffix(rel, ".jsonl") {
-			data = relocate(data)
-		}
-		p := filepath.Join(sessionDir, filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
-			return res, err
-		}
-		if err := writeAtomic(p, data); err != nil {
-			return res, err
-		}
-	}
-	if !res.Unchanged {
-		if err := writeAtomic(res.Target, transcript); err != nil {
-			return res, err
-		}
-	}
-	return res, nil
-}
-
-// writeAtomic replaces path with data via a temp file and rename, so a
-// crash never leaves a half-written file behind.
-func writeAtomic(p string, data []byte) error {
-	f, err := os.CreateTemp(filepath.Dir(p), ".ccsync-*")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	_, werr := f.Write(data)
-	if err := errors.Join(werr, f.Sync(), f.Close(), os.Chmod(tmp, 0o600)); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	if err := os.Rename(tmp, p); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return nil
 }

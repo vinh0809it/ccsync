@@ -1,13 +1,17 @@
 package session
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/vinhvh0809/ccsync/internal/testutil"
 )
 
 func TestSlugForPath(t *testing.T) {
@@ -27,19 +31,10 @@ func TestSlugForPath(t *testing.T) {
 // fixture writes a minimal transcript for project path cwd and returns the file.
 func fixture(t *testing.T, claudeDir, cwd, id, title string) string {
 	t.Helper()
-	dir := filepath.Join(claudeDir, "projects", SlugForPath(cwd))
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	content := `{"type":"custom-title","customTitle":"` + title + `","sessionId":"` + id + `"}
-{"type":"system","cwd":"` + cwd + `","version":"2.1.220","sessionId":"` + id + `"}
-{"type":"user","message":"the file lives in ` + cwd + `/src/main.go"}
-`
-	file := filepath.Join(dir, id+".jsonl")
-	if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return file
+	return testutil.WriteSession(t, claudeDir, SlugForPath(cwd), id,
+		testutil.TitleLine(title),
+		testutil.CwdLine(cwd),
+		`{"type":"user","message":"the file lives in `+testutil.JSONString(cwd)+`/src/main.go"}`)
 }
 
 func TestListForProjectAndInspect(t *testing.T) {
@@ -252,6 +247,26 @@ func TestUnpackRejectsUnsafeEntries(t *testing.T) {
 		if _, err := Unpack(payload); err == nil {
 			t.Errorf("Unpack accepted %q", rel)
 		}
+	}
+}
+
+// TestUnpackSkipsUnknownEntries: a bundle from a newer ccsync may carry
+// entries this version doesn't know; they are ignored, not fatal.
+func TestUnpackSkipsUnknownEntries(t *testing.T) {
+	var tarBuf bytes.Buffer
+	tw := tar.NewWriter(&tarBuf)
+	for name, data := range map[string]string{transcriptEntry: "t", "future/thing": "x"} {
+		tw.WriteHeader(&tar.Header{Name: name, Mode: 0o600, Size: int64(len(data)), Typeflag: tar.TypeReg})
+		tw.Write([]byte(data))
+	}
+	tw.Close()
+	var gz bytes.Buffer
+	zw := gzip.NewWriter(&gz)
+	zw.Write(tarBuf.Bytes())
+	zw.Close()
+	c, err := Unpack(gz.Bytes())
+	if err != nil || string(c.Transcript) != "t" || len(c.Companion) != 0 {
+		t.Fatalf("Unpack = %+v, %v", c, err)
 	}
 }
 

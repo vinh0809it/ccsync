@@ -26,7 +26,7 @@ if command -v goversioninfo >/dev/null; then
   goversioninfo -platform-specific -o resource.syso \
     -ver-major "$MAJ" -ver-minor "$MIN" -ver-patch "$PAT" \
     -product-ver-major "$MAJ" -product-ver-minor "$MIN" -product-ver-patch "$PAT" \
-    -product-version "$VERSION" versioninfo.json
+    -product-version "$VERSION" build/versioninfo.json
 fi
 
 build() { # os arch ext

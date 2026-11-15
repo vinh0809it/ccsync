@@ -40,8 +40,10 @@
 - Bundles may carry entries a newer ccsync adds; older versions skip them.
 - Git runs with `LC_ALL=C`, and never prompts for credentials from the GUI.
 - Module path is `github.com/vinhvh0809/ccsync` (`go install` works).
+- The GUI API accepts only the intended HTTP method per endpoint.
 
 ### Added
+- `ccsync rm` (and a Delete button in the GUI) to remove sessions from the store.
 - `ccsync migrate`, `ccsync version`.
 - CI (gofmt, vet, race tests, govulncheck) and tagged releases with checksums.
 

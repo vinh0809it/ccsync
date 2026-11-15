@@ -611,12 +611,24 @@ function renderStore() {
           · ${esc(m.project_label || '')} · from ${esc(m.hostname || '?')}</div>
       </div>
       <div class="side"><div class="t">${when(m.session_mtime)}</div><div class="s">${size(m.size)}</div></div>
-      <button class="btn ghost sm">Pull</button>
+      <button class="btn ghost sm" data-act="pull">Pull</button>
+      <button class="btn ghost sm" data-act="remove" aria-label="Delete from store" title="Delete from store">Delete</button>
     </div>`).join('');
   list.querySelectorAll('.row.store').forEach(row => {
     const m = storeMetas.find(x => x.session_id === row.dataset.id);
-    row.querySelector('button').addEventListener('click', () => openPull(m));
+    row.querySelector('[data-act="pull"]').addEventListener('click', () => openPull(m));
+    row.querySelector('[data-act="remove"]').addEventListener('click', () => doRemove(m));
   });
+}
+
+async function doRemove(m) {
+  const name = m.title || short(m.session_id);
+  if (!confirm(`Delete "${name}" from the store?\n\nLocal copies are not touched. Old versions stay in the repo's git history.`)) return;
+  try {
+    await api('/api/remove', { ids: [m.session_id] });
+    toast('Deleted from the store');
+    loadStore();
+  } catch (e) { toast(e.message, true); }
 }
 
 function openPull(m) {

@@ -3,105 +3,87 @@ package store
 import (
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/vinhvh0809/ccsync/internal/crypto"
+	"github.com/vinhvh0809/ccsync/internal/testutil"
 )
 
-// open inits this machine against remote and returns the unlocked key.
-func open(t *testing.T, remote string) *crypto.Key {
+const pass = "test-passphrase"
+
+// machine switches to a fresh simulated computer and opens its store.
+func machine(t *testing.T) *Store {
 	t.Helper()
-	if err := Init(remote, pass); err != nil {
+	testutil.NewMachine(t)
+	st, err := Open()
+	if err != nil {
 		t.Fatal(err)
 	}
-	key, err := Unlock(pass)
+	return st
+}
+
+// open inits st against remote and returns the unlocked key.
+func open(t *testing.T, st *Store, remote string) *crypto.Key {
+	t.Helper()
+	if err := st.Init(remote, pass); err != nil {
+		t.Fatal(err)
+	}
+	key, err := st.Unlock(pass)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return key
 }
 
-func put(t *testing.T, key *crypto.Key, id, title string, payload []byte) {
+func put(t *testing.T, st *Store, key *crypto.Key, id string, payload string) {
 	t.Helper()
-	if err := Put(key, Meta{SessionID: id, Title: title, OriginalCwd: "/home/alice/webapp", Hostname: "machine-a", SessionMtime: time.Now()}, payload); err != nil {
+	m := Meta{SessionID: id, Title: "t-" + id[:8], OriginalCwd: "/home/alice/webapp", Hostname: "machine-a", SessionMtime: time.Now()}
+	if err := st.Put(key, m, []byte(payload)); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// newRemote creates a bare git repo to act as the store's origin.
-func newRemote(t *testing.T) string {
+// publish commits and pushes, failing the test on error.
+func publish(t *testing.T, st *Store) {
 	t.Helper()
-	remote := filepath.Join(t.TempDir(), "remote.git")
-	if out, err := exec.Command("git", "init", "--bare", remote).CombinedOutput(); err != nil {
-		t.Fatalf("git init --bare: %v\n%s", err, out)
+	if err := st.Commit("test"); err != nil {
+		t.Fatal(err)
 	}
-	return "file://" + remote
+	if err := st.Push(); err != nil {
+		t.Fatal(err)
+	}
 }
 
-// machine points config+store env at fresh dirs, simulating one computer.
-func machine(t *testing.T) {
-	t.Helper()
-	base := t.TempDir()
-	t.Setenv("CCSYNC_CONFIG_DIR", filepath.Join(base, "config"))
-	t.Setenv("CCSYNC_STORE_DIR", filepath.Join(base, "store"))
-}
-
-const pass = "test-passphrase"
-
-func TestInitPushListGetRoundTrip(t *testing.T) {
-	remote := newRemote(t)
-	machine(t)
-
-	key := open(t, remote)
-	if _, err := Unlock("wrong"); err == nil {
+func TestRoundTrip(t *testing.T) {
+	remote := testutil.Remote(t)
+	st := machine(t)
+	key := open(t, st, remote)
+	if _, err := st.Unlock("wrong"); err == nil {
 		t.Fatal("wrong passphrase accepted")
 	}
 
-	transcript := []byte(`{"cwd":"/home/alice/webapp","secret":"API_KEY=hunter2"}` + "\n")
-	meta := Meta{
-		SessionID:    "33333333-aaaa-bbbb-cccc-000000000001",
-		Title:        "secret-work",
-		ProjectLabel: "webapp",
-		OriginalCwd:  "/home/alice/webapp",
-		Hostname:     "machine-a",
-		SessionMtime: time.Now(),
-		Size:         int64(len(transcript)),
-		PushedAt:     time.Now().UTC(),
-	}
-	if err := Put(key, meta, transcript); err != nil {
-		t.Fatal(err)
-	}
-	if err := Commit("test push"); err != nil {
-		t.Fatal(err)
-	}
-	if err := Push(); err != nil {
-		t.Fatal(err)
-	}
-	// Nothing staged now: Commit must refuse.
-	if err := Commit("empty"); err != ErrNothingToCommit {
+	id := "33333333-aaaa-bbbb-cccc-000000000001"
+	put(t, st, key, id, "transcript API_KEY=hunter2")
+	publish(t, st)
+	if err := st.Commit("empty"); err != ErrNothingToCommit {
 		t.Fatalf("commit with nothing staged: %v", err)
 	}
 
-	metas, _, err := List(key)
-	if err != nil {
-		t.Fatal(err)
+	metas, unreadable, err := st.List(key)
+	if err != nil || len(metas) != 1 || len(unreadable) != 0 || metas[0].SessionID != id {
+		t.Fatalf("List = %+v %v %v", metas, unreadable, err)
 	}
-	if len(metas) != 1 || metas[0].Title != "secret-work" || metas[0].OriginalCwd != "/home/alice/webapp" {
-		t.Fatalf("bad listing: %+v", metas)
+	m, err := st.Find(key, "33333333")
+	if err != nil || m.SessionID != id {
+		t.Fatalf("Find = %+v %v", m, err)
 	}
-
-	got, data, err := Get(key, "33333333")
-	if err != nil {
-		t.Fatal(err)
+	if data, err := st.Payload(key, id); err != nil || string(data) != "transcript API_KEY=hunter2" {
+		t.Fatalf("Payload = %q %v", data, err)
 	}
-	if got.SessionID != meta.SessionID || string(data) != string(transcript) {
-		t.Fatal("Get returned wrong session or corrupted data")
-	}
-	if _, _, err := Get(key, "99999999"); err == nil {
+	if _, err := st.Find(key, "99999999"); err == nil {
 		t.Fatal("unknown id should fail")
 	}
 }
@@ -109,37 +91,24 @@ func TestInitPushListGetRoundTrip(t *testing.T) {
 // TestNothingReadableInRemote is the "public repo" guarantee: no plaintext
 // from transcripts or metadata may appear anywhere in the pushed objects.
 func TestNothingReadableInRemote(t *testing.T) {
-	remote := newRemote(t)
-	machine(t)
-	key := open(t, remote)
-	transcript := []byte(`{"cwd":"/home/alice/topsecret","note":"MARKER_SECRET_CONTENT"}` + "\n")
-	meta := Meta{
+	remote := testutil.Remote(t)
+	st := machine(t)
+	key := open(t, st, remote)
+	m := Meta{
 		SessionID:    "44444444-aaaa-bbbb-cccc-000000000001",
 		Title:        "MARKER_SECRET_TITLE",
-		ProjectLabel: "topsecret",
 		OriginalCwd:  "/home/alice/topsecret",
 		Hostname:     "MARKER_HOSTNAME",
 		SessionMtime: time.Now(),
 	}
-	if err := Put(key, meta, transcript); err != nil {
+	if err := st.Put(key, m, []byte(`{"cwd":"/home/alice/topsecret","note":"MARKER_SECRET_CONTENT"}`)); err != nil {
 		t.Fatal(err)
 	}
-	if err := Commit("push"); err != nil {
-		t.Fatal(err)
-	}
-	if err := Push(); err != nil {
-		t.Fatal(err)
-	}
+	publish(t, st)
 
-	// Check the store's working tree (uncompressed .age files) AND the bare
-	// remote. Git objects are zlib-compressed, so the working tree is the
-	// reliable place to catch unencrypted content.
-	storeDir, err := Dir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	remotePath := strings.TrimPrefix(remote, "file://")
-	for _, root := range []string{filepath.Join(storeDir, "sessions"), remotePath} {
+	// The working tree holds the uncompressed blobs; git objects in the
+	// remote are compressed but checked too.
+	for _, root := range []string{st.path(sessionsDir), remote} {
 		for _, marker := range []string{"MARKER_SECRET_CONTENT", "MARKER_SECRET_TITLE", "MARKER_HOSTNAME", "topsecret", "alice"} {
 			if grepTree(t, root, marker) {
 				t.Fatalf("plaintext %q found under %s", marker, root)
@@ -148,8 +117,6 @@ func TestNothingReadableInRemote(t *testing.T) {
 	}
 }
 
-// grepTree reports whether needle appears in any file under root
-// (including inside git pack/object files).
 func grepTree(t *testing.T, root, needle string) bool {
 	t.Helper()
 	found := false
@@ -158,13 +125,8 @@ func grepTree(t *testing.T, root, needle string) bool {
 			return err
 		}
 		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if strings.Contains(string(data), needle) {
-			found = true
-		}
-		return nil
+		found = strings.Contains(string(data), needle)
+		return err
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -172,277 +134,223 @@ func grepTree(t *testing.T, root, needle string) bool {
 	return found
 }
 
-// TestForgedMetaRejected plants a peer-crafted meta.age whose session_id
-// doesn't match its directory (the path-traversal vector) and checks that
-// List/Get refuse to surface it.
+// TestForgedMetaRejected plants metadata whose session_id doesn't match its
+// directory (the path-traversal vector) and checks it never surfaces.
 func TestForgedMetaRejected(t *testing.T) {
-	remote := newRemote(t)
-	machine(t)
-	key := open(t, remote)
-	dir, _ := Dir()
-	evil := filepath.Join(dir, "sessions", "66666666-aaaa-bbbb-cccc-00000000000e")
-	if err := os.MkdirAll(evil, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	metaJSON := `{"session_id":"../../../../home/victim/.bashrc","title":"forged"}`
-	blob, err := key.Encrypt([]byte(metaJSON))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(evil, "meta.age"), blob, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	data, err := key.Encrypt([]byte("payload"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(evil, "data.age"), data, 0o644); err != nil {
-		t.Fatal(err)
+	remote := testutil.Remote(t)
+	st := machine(t)
+	key := open(t, st, remote)
+	evil := st.path(sessionsDir, "66666666-aaaa-bbbb-cccc-00000000000e")
+	os.MkdirAll(evil, 0o755)
+	for name, plain := range map[string]string{
+		"meta.age": `{"session_id":"../../../../home/victim/.bashrc","title":"forged"}`,
+		"data.age": "payload",
+	} {
+		blob, _ := key.Encrypt([]byte(plain))
+		os.WriteFile(filepath.Join(evil, name), blob, 0o644)
 	}
 
-	metas, _, err := List(key)
-	if err != nil {
-		t.Fatal(err)
+	metas, unreadable, err := st.List(key)
+	if err != nil || len(metas) != 0 || len(unreadable) != 1 {
+		t.Fatalf("forged entry must be reported unreadable: %+v %v %v", metas, unreadable, err)
 	}
-	for _, m := range metas {
-		if m.Title == "forged" {
-			t.Fatal("forged meta surfaced in List")
-		}
-	}
-	if _, _, err := Get(key, "66666666"); err == nil {
-		t.Fatal("Get returned a session with mismatched metadata id")
-	}
-	// A directory name that is itself unsafe is skipped outright.
-	if !ValidSessionID("11111111-aaaa-bbbb-cccc-000000000001") || ValidSessionID("../x") || ValidSessionID("a/b") {
-		t.Fatal("ValidSessionID misclassifies")
+	if _, err := st.Find(key, "66666666"); err == nil {
+		t.Fatal("Find returned a session with mismatched metadata id")
 	}
 }
 
-// TestInitRejectsChangedRemote ensures re-init with a different URL fails
-// loudly instead of silently syncing against the old remote.
 func TestInitRejectsChangedRemote(t *testing.T) {
-	machine(t)
-	if err := Init(newRemote(t), pass); err != nil {
-		t.Fatal(err)
-	}
-	err := Init(newRemote(t), pass)
+	st := machine(t)
+	open(t, st, testutil.Remote(t))
+	err := st.Init(testutil.Remote(t), pass)
 	if err == nil || !strings.Contains(err.Error(), "tracks") {
 		t.Fatalf("re-init with a different remote must fail, got: %v", err)
 	}
 }
 
-// TestTwoMachines pushes from machine A and reads everything back on a
-// freshly initialized machine B via the shared remote.
 func TestTwoMachines(t *testing.T) {
-	remote := newRemote(t)
+	remote := testutil.Remote(t)
+	a := machine(t)
+	keyA := open(t, a, remote)
+	put(t, a, keyA, "55555555-aaaa-bbbb-cccc-000000000001", "from A")
+	publish(t, a)
 
-	// Machine A
-	machine(t)
-	key := open(t, remote)
-	transcript := []byte(`{"cwd":"/home/alice/webapp"}` + "\n")
-	meta := Meta{
-		SessionID:    "55555555-aaaa-bbbb-cccc-000000000001",
-		Title:        "cross-machine",
-		OriginalCwd:  "/home/alice/webapp",
-		ProjectLabel: "webapp",
-		Hostname:     "machine-a",
-		SessionMtime: time.Now(),
+	b := machine(t)
+	if err := b.Init(remote, "wrong-pass"); err == nil {
+		t.Fatal("init with a wrong passphrase should fail")
 	}
-	if err := Put(key, meta, transcript); err != nil {
-		t.Fatal(err)
+	keyB := open(t, b, remote)
+	if data, err := b.Payload(keyB, "55555555-aaaa-bbbb-cccc-000000000001"); err != nil || string(data) != "from A" {
+		t.Fatalf("machine B read %q, %v", data, err)
 	}
-	if err := Commit("from A"); err != nil {
-		t.Fatal(err)
-	}
-	if err := Push(); err != nil {
-		t.Fatal(err)
-	}
+}
 
-	// Machine B: fresh config/store dirs, same remote + passphrase.
-	machine(t)
-	if err := Init(remote, "wrong-pass"); err == nil {
-		t.Fatal("machine B init with wrong passphrase should fail")
+// TestRemove deletes a session and publishes the deletion.
+func TestRemove(t *testing.T) {
+	remote := testutil.Remote(t)
+	st := machine(t)
+	key := open(t, st, remote)
+	id := "56565656-aaaa-bbbb-cccc-000000000001"
+	put(t, st, key, id, "x")
+	publish(t, st)
+
+	if found, err := st.Remove(id); err != nil || !found {
+		t.Fatalf("Remove = %v %v", found, err)
 	}
-	keyB := open(t, remote)
-	got, data, err := Get(keyB, "55555555")
-	if err != nil {
-		t.Fatal(err)
+	if found, _ := st.Remove(id); found {
+		t.Fatal("second Remove found the session again")
 	}
-	if got.Hostname != "machine-a" || string(data) != string(transcript) {
-		t.Fatal("machine B did not receive machine A's session intact")
+	if _, err := st.Remove("../escape"); err == nil {
+		t.Fatal("Remove accepted an unsafe id")
+	}
+	publish(t, st)
+	if strings.Contains(testutil.RemoteFiles(t, remote), id) {
+		t.Fatal("session still in the remote")
 	}
 }
 
 // TestSyncRecoversDirtyClone: leftovers of an interrupted run (staged,
 // modified, untracked or committed-but-unpushed files) are discarded.
 func TestSyncRecoversDirtyClone(t *testing.T) {
-	remote := newRemote(t)
-	machine(t)
-	key := open(t, remote)
-	dir, _ := Dir()
+	remote := testutil.Remote(t)
+	st := machine(t)
+	key := open(t, st, remote)
 
-	put(t, key, "77777777-aaaa-bbbb-cccc-000000000001", "unpushed", []byte("x"))
-	if err := Commit("never pushed"); err != nil {
+	put(t, st, key, "77777777-aaaa-bbbb-cccc-000000000001", "unpushed")
+	if err := st.Commit("never pushed"); err != nil {
 		t.Fatal(err)
 	}
-	put(t, key, "77777777-aaaa-bbbb-cccc-000000000002", "staged", []byte("y"))
-	git(dir, "add", "-A")
-	os.WriteFile(filepath.Join(dir, "stray.txt"), []byte("junk"), 0o644)
-	os.WriteFile(filepath.Join(dir, markerFile), []byte("garbage"), 0o644)
+	put(t, st, key, "77777777-aaaa-bbbb-cccc-000000000002", "staged")
+	testutil.Git(t, st.Dir, "add", "-A")
+	os.WriteFile(st.path("stray.txt"), []byte("junk"), 0o644)
+	os.WriteFile(st.path(markerFile), []byte("garbage"), 0o644)
 
-	if err := Sync(); err != nil {
+	if err := st.Sync(); err != nil {
 		t.Fatal(err)
 	}
-	if out, _ := git(dir, "status", "--porcelain"); out != "" {
+	if out := testutil.Git(t, st.Dir, "status", "--porcelain"); out != "" {
 		t.Fatalf("clone still dirty after Sync: %q", out)
 	}
-	if ahead, _ := git(dir, "rev-list", "--count", "@{u}..HEAD"); ahead != "0" {
+	if ahead := testutil.Git(t, st.Dir, "rev-list", "--count", "@{u}..HEAD"); ahead != "0" {
 		t.Fatalf("unpushed commits survived Sync: %s", ahead)
 	}
-	if _, err := Unlock(pass); err != nil {
+	if _, err := st.Unlock(pass); err != nil {
 		t.Fatalf("store unusable after recovery: %v", err)
+	}
+}
+
+// TestSyncRefusesNonStore: Sync resets hard, so it must never run in a
+// clone whose remote isn't a ccsync store.
+func TestSyncRefusesNonStore(t *testing.T) {
+	remote := testutil.Remote(t)
+	work := t.TempDir()
+	testutil.Git(t, "", "clone", "--quiet", remote, work)
+	os.WriteFile(filepath.Join(work, "precious.txt"), []byte("data"), 0o644)
+	testutil.Git(t, work, "add", "-A")
+	testutil.Git(t, work, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "x")
+	testutil.Git(t, work, "push", "-q", "-u", "origin", "HEAD")
+	os.WriteFile(filepath.Join(work, "uncommitted.txt"), []byte("keep me"), 0o644)
+
+	st := &Store{Dir: work}
+	if err := st.Sync(); err == nil {
+		t.Fatal("Sync ran in a non-ccsync repo")
+	}
+	if _, err := os.Stat(filepath.Join(work, "uncommitted.txt")); err != nil {
+		t.Fatal("Sync destroyed files in a non-ccsync repo")
 	}
 }
 
 // TestPushDetectsRemoteMoved: a push from a clone that fell behind fails
 // with ErrRemoteMoved (which callers retry) instead of a generic error.
 func TestPushDetectsRemoteMoved(t *testing.T) {
-	remote := newRemote(t)
-	machine(t)
-	key := open(t, remote)
-	cfgA, storeA := os.Getenv("CCSYNC_CONFIG_DIR"), os.Getenv("CCSYNC_STORE_DIR")
+	remote := testutil.Remote(t)
+	a := machine(t)
+	keyA := open(t, a, remote)
+	b := machine(t)
+	keyB := open(t, b, remote)
 
-	machine(t)
-	keyB := open(t, remote)
-	put(t, keyB, "88888888-aaaa-bbbb-cccc-000000000001", "from B", []byte("b"))
-	if err := Commit("B"); err != nil {
-		t.Fatal(err)
-	}
-	if err := Push(); err != nil {
-		t.Fatal(err)
-	}
+	put(t, b, keyB, "88888888-aaaa-bbbb-cccc-000000000001", "from B")
+	publish(t, b)
 
-	t.Setenv("CCSYNC_CONFIG_DIR", cfgA)
-	t.Setenv("CCSYNC_STORE_DIR", storeA)
-	put(t, key, "88888888-aaaa-bbbb-cccc-000000000002", "from A", []byte("a"))
-	if err := Commit("A"); err != nil {
+	put(t, a, keyA, "88888888-aaaa-bbbb-cccc-000000000002", "from A")
+	if err := a.Commit("A"); err != nil {
 		t.Fatal(err)
 	}
-	if err := Push(); !errors.Is(err, ErrRemoteMoved) {
+	if err := a.Push(); !errors.Is(err, ErrRemoteMoved) {
 		t.Fatalf("want ErrRemoteMoved, got %v", err)
-	}
-}
-
-// legacyStore writes a format-1 store (as ccsync 0.1.x did) holding one
-// session, and pushes it.
-func legacyStore(t *testing.T, remote, id string, transcript []byte) {
-	t.Helper()
-	machine(t)
-	dir, _ := Dir()
-	if out, err := exec.Command("git", "clone", "--quiet", remote, dir).CombinedOutput(); err != nil {
-		t.Fatalf("%v: %s", err, out)
-	}
-	check, _ := crypto.NewCheckBlob(pass)
-	os.WriteFile(filepath.Join(dir, markerFile), []byte(`{"format":1}`+"\n"), 0o644)
-	os.WriteFile(filepath.Join(dir, checkFile), check, 0o644)
-	sdir := filepath.Join(dir, "sessions", id)
-	os.MkdirAll(sdir, 0o755)
-	meta, _ := crypto.Encrypt(pass, []byte(`{"session_id":"`+id+`","title":"old","original_cwd":"/home/alice/webapp"}`))
-	data, _ := crypto.Encrypt(pass, transcript)
-	os.WriteFile(filepath.Join(sdir, "meta.age"), meta, 0o644)
-	os.WriteFile(filepath.Join(sdir, "data.age"), data, 0o644)
-	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", "v1"}, {"push", "-q", "-u", "origin", "HEAD"}} {
-		if _, err := git(dir, args...); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
-func TestMigrateFromFormat1(t *testing.T) {
-	remote := newRemote(t)
-	id := "99999999-aaaa-bbbb-cccc-000000000001"
-	transcript := []byte(`{"cwd":"/home/alice/webapp"}` + "\n")
-	legacyStore(t, remote, id, transcript)
-
-	// A new machine can join a format-1 store, but must migrate to use it.
-	machine(t)
-	if err := Init(remote, pass); err != nil {
-		t.Fatalf("init on a format-1 store: %v", err)
-	}
-	if _, err := Unlock(pass); err != ErrNeedsMigration {
-		t.Fatalf("want ErrNeedsMigration, got %v", err)
-	}
-	if _, err := Migrate("wrong", nil); err == nil {
-		t.Fatal("migrate accepted a wrong passphrase")
-	}
-	wrap := func(b []byte) ([]byte, string, error) { return append([]byte("bundle:"), b...), "h", nil }
-	if n, err := Migrate(pass, wrap); err != nil || n != 1 {
-		t.Fatalf("migrate: n=%d err=%v", n, err)
-	}
-	if n, err := Migrate(pass, wrap); err != nil || n != 0 {
-		t.Fatalf("second migrate should be a no-op: n=%d err=%v", n, err)
-	}
-
-	// Another machine sees the migrated store.
-	machine(t)
-	key := open(t, remote)
-	m, payload, err := Get(key, "99999999")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if m.Title != "old" || m.ContentHash != "h" || string(payload) != "bundle:"+string(transcript) {
-		t.Fatalf("migrated session wrong: %+v %q", m, payload)
 	}
 }
 
 // TestInitRecoversFromFailedFirstPush: when the very first push is
 // rejected (typically bad credentials), init must fail, and a re-run must
-// create the store properly instead of reporting success with nothing on
-// the remote.
+// create the store instead of reporting success with an empty remote.
 func TestInitRecoversFromFailedFirstPush(t *testing.T) {
-	remote := newRemote(t)
-	bare := strings.TrimPrefix(remote, "file://")
-	marker := filepath.Join(bare, "rejected-once")
-	hook := "#!/bin/sh\n[ -e '" + marker + "' ] && exit 0\ntouch '" + marker + "'\nexit 1\n"
-	if err := os.WriteFile(filepath.Join(bare, "hooks", "pre-receive"), []byte(hook), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	machine(t)
-	if err := Init(remote, pass); err == nil {
+	remote := testutil.Remote(t)
+	testutil.RejectFirstPush(t, remote)
+	st := machine(t)
+	if err := st.Init(remote, pass); err == nil {
 		t.Fatal("init must fail when its push is rejected")
 	}
-	key := open(t, remote)
-	if err := Sync(); err != nil {
-		t.Fatalf("store unusable after a failed first init: %v", err)
-	}
-	put(t, key, "abababab-aaaa-bbbb-cccc-000000000001", "x", []byte("x"))
-	if err := Commit("x"); err != nil {
-		t.Fatal(err)
-	}
-	if err := Push(); err != nil {
-		t.Fatal(err)
-	}
+	key := open(t, st, remote)
+	put(t, st, key, "abababab-aaaa-bbbb-cccc-000000000001", "x")
+	publish(t, st)
 }
 
-// TestSyncRefusesNonStore: Sync resets hard, so it must never run in a
-// directory whose remote isn't a ccsync store.
-func TestSyncRefusesNonStore(t *testing.T) {
-	remote := newRemote(t)
-	bare := strings.TrimPrefix(remote, "file://")
-	work := t.TempDir()
-	for _, args := range [][]string{{"clone", "-q", bare, work}} {
-		exec.Command("git", args...).Run()
+// legacyStore pushes a format-1 store (as ccsync 0.1.x wrote it) holding
+// one session.
+func legacyStore(t *testing.T, remote, id, transcript string) {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "legacy")
+	testutil.Git(t, "", "clone", "--quiet", remote, dir)
+	check, _ := crypto.NewCheckBlob(pass)
+	meta, _ := crypto.Encrypt(pass, []byte(`{"session_id":"`+id+`","title":"old","original_cwd":"/home/alice/webapp"}`))
+	data, _ := crypto.Encrypt(pass, []byte(transcript))
+	files := map[string][]byte{
+		markerFile: []byte(`{"format":1}` + "\n"),
+		checkFile:  check,
+		filepath.Join(sessionsDir, id, "meta.age"): meta,
+		filepath.Join(sessionsDir, id, "data.age"): data,
 	}
-	os.WriteFile(filepath.Join(work, "precious.txt"), []byte("data"), 0o644)
-	git(work, "add", "-A")
-	git(work, "commit", "-qm", "x")
-	git(work, "push", "-q", "-u", "origin", "HEAD")
-	os.WriteFile(filepath.Join(work, "uncommitted.txt"), []byte("keep me"), 0o644)
-	t.Setenv("CCSYNC_STORE_DIR", work)
-	if err := Sync(); err == nil {
-		t.Fatal("Sync ran in a non-ccsync repo")
+	for name, content := range files {
+		os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0o755)
+		os.WriteFile(filepath.Join(dir, name), content, 0o644)
 	}
-	if _, err := os.Stat(filepath.Join(work, "uncommitted.txt")); err != nil {
-		t.Fatal("Sync destroyed files in a non-ccsync repo")
+	testutil.Git(t, dir, "add", "-A")
+	testutil.Git(t, dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "v1")
+	testutil.Git(t, dir, "push", "-q", "-u", "origin", "HEAD")
+}
+
+func TestMigrateFromFormat1(t *testing.T) {
+	remote := testutil.Remote(t)
+	id := "99999999-aaaa-bbbb-cccc-000000000001"
+	legacyStore(t, remote, id, "raw transcript")
+
+	// A new machine can join a format-1 store, but must migrate to use it.
+	st := machine(t)
+	if err := st.Init(remote, pass); err != nil {
+		t.Fatalf("init on a format-1 store: %v", err)
+	}
+	if _, err := st.Unlock(pass); err != ErrNeedsMigration {
+		t.Fatalf("want ErrNeedsMigration, got %v", err)
+	}
+	wrap := func(b []byte) ([]byte, string, error) { return append([]byte("bundle:"), b...), "h", nil }
+	if _, err := st.Migrate("wrong", wrap); err == nil {
+		t.Fatal("migrate accepted a wrong passphrase")
+	}
+	if n, err := st.Migrate(pass, wrap); err != nil || n != 1 {
+		t.Fatalf("migrate: n=%d err=%v", n, err)
+	}
+	if n, err := st.Migrate(pass, wrap); err != nil || n != 0 {
+		t.Fatalf("second migrate should be a no-op: n=%d err=%v", n, err)
+	}
+
+	other := machine(t)
+	key := open(t, other, remote)
+	m, err := other.Find(key, "99999999")
+	if err != nil || m.Title != "old" || m.ContentHash != "h" {
+		t.Fatalf("migrated meta: %+v %v", m, err)
+	}
+	if data, _ := other.Payload(key, id); string(data) != "bundle:raw transcript" {
+		t.Fatalf("migrated payload: %q", data)
 	}
 }

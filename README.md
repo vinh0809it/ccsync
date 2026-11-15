@@ -39,6 +39,7 @@ ccsync sessions                  # list local sessions of the current project
 ccsync push <id> [<id>...]       # push selected sessions (id prefixes work)
 ccsync push --all                # push all (skips sessions active in the last 30 s)
 ccsync ls                        # list what's in the store
+ccsync rm <id>                   # delete a session from the store
 
 # on the other machine:
 ccsync pull <id> --to ~/dev/myproject
@@ -54,7 +55,7 @@ honoured like Claude Code does.
 ### GUI
 
 ```sh
-ccsync gui                 # opens the browser UI (setup, unlock, push, pull)
+ccsync gui                 # opens the browser UI (setup, unlock, push, pull, delete)
 ccsync gui --port 8931 --no-open
 ```
 
@@ -134,8 +135,9 @@ entries it can't read; running `ccsync migrate` again converts them.
   wrote each session.
 - Never resume the *same* session on two machines at once and push both —
   the last push wins.
-- The git history keeps every pushed version. To reclaim space, start a new
-  store repo and push again.
+- The git history keeps every pushed version, including sessions removed
+  with `ccsync rm`. To reclaim space (or truly erase), start a new store repo
+  and push again.
 - For project paths over 200 characters Claude Code adds a hash to the folder
   name that ccsync can't reproduce: start one Claude Code session in the
   destination first, then pull.
@@ -194,10 +196,15 @@ API flow over HTTP.
 
 - [x] GUI (local web UI served by the binary)
 - [x] Conflict-aware push (retry after another machine pushes)
-- [ ] `ccsync rm` to delete sessions from the store
+- [x] `ccsync rm` to delete sessions from the store
 - [ ] OS keychain caching of the passphrase
 - [ ] Native windows on Windows/macOS (CI build matrix)
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md); report security issues as described in
+[SECURITY.md](SECURITY.md).
+
 ## License
 
-MIT
+[MIT](LICENSE)
