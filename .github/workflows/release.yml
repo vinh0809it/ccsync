@@ -12,15 +12,15 @@ jobs:
   binaries:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           # Latest patched release; go.mod only states the minimum.
           go-version: stable
       - run: go test ./...
       - run: go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.7.0
       - run: VERSION="${GITHUB_REF_NAME#v}" ./build/dist.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: binaries
           path: dist/ccsync-*
@@ -32,8 +32,8 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
       - if: runner.os == 'Linux'
@@ -42,7 +42,7 @@ jobs:
         run: go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.7.0
       - shell: bash
         run: VERSION="${GITHUB_REF_NAME#v}" ./build/desktop.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: desktop-${{ runner.os }}
           path: dist/ccsync-*
@@ -51,8 +51,8 @@ jobs:
     needs: [binaries, desktop]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
