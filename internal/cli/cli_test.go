@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vinh-vh/ccsync/internal/session"
-	"github.com/vinh-vh/ccsync/internal/testutil"
+	"github.com/vinh0809it/ccsync/internal/session"
+	"github.com/vinh0809it/ccsync/internal/testutil"
 )
 
 // run executes a command line and returns exit code, stdout and stderr.
@@ -143,5 +143,20 @@ func TestStoreCommands(t *testing.T) {
 	mustRun(t, "store", "forget", "work")
 	if out := mustRun(t, "store", "list"); strings.Contains(out, "work") || !strings.Contains(out, "* home") {
 		t.Fatalf("after forget:\n%s", out)
+	}
+}
+
+func TestInitFolderStore(t *testing.T) {
+	t.Setenv("CCSYNC_PASSPHRASE", "cli-test-pass")
+	testutil.NewMachine(t)
+	folder := filepath.Join(t.TempDir(), "Dropbox", "claude")
+	if out := mustRun(t, "init", "--folder", folder, "--name", "box"); !strings.Contains(out, `"box"`) {
+		t.Fatalf("init --folder: %q", out)
+	}
+	if out := mustRun(t, "store", "list"); !strings.Contains(out, "folder") || !strings.Contains(out, folder) {
+		t.Fatalf("store list: %q", out)
+	}
+	if code, _, _ := run(t, "init", "--folder", folder, "--github", "x"); code != exitUsage {
+		t.Fatalf("two locations accepted: %d", code)
 	}
 }

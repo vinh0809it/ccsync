@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/vinh-vh/ccsync/internal/crypto"
-	"github.com/vinh-vh/ccsync/internal/session"
+	"github.com/vinh0809it/ccsync/internal/crypto"
+	"github.com/vinh0809it/ccsync/internal/session"
 )
 
 // Session ids name directories in the store, which other machines write;
@@ -22,13 +22,14 @@ func checkID(id string) error {
 	return nil
 }
 
-// Put encrypts and stages one session into the clone.
+// Put encrypts one session into the store's files (Commit and Push then
+// share it). The bundle is written before the metadata, and every file
+// atomically, so a reader never sees half of a file.
 func (s *Store) Put(key *crypto.Key, meta Meta, payload []byte) error {
 	if err := checkID(meta.SessionID); err != nil {
 		return err
 	}
-	dir := s.path(sessionsDir, meta.SessionID)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(s.path(sessionsDir, meta.SessionID), 0o755); err != nil {
 		return err
 	}
 	metaJSON, err := json.Marshal(meta)
@@ -42,7 +43,7 @@ func (s *Store) Put(key *crypto.Key, meta Meta, payload []byte) error {
 	if err := s.writeData(meta.SessionID, func(w io.Writer) error { return key.EncryptTo(w, payload) }); err != nil {
 		return err
 	}
-	return os.WriteFile(s.path(sessionsDir, meta.SessionID, "meta.age"), metaBlob, 0o644)
+	return writeAtomic(s.path(sessionsDir, meta.SessionID, "meta.age"), metaBlob)
 }
 
 // partSize bounds each file of a session's encrypted bundle. Git hosts
@@ -58,28 +59,40 @@ func partName(i int) string {
 }
 
 // writeData stores a session's encrypted bundle, streamed by write, in
-// parts of at most partSize, removing stale parts of an earlier version.
+// parts of at most partSize. Parts are written to temp files and renamed
+// into place only once all were written; parts left over from a larger
+// earlier version are removed last. A failed write leaves the previous
+// version intact.
 func (s *Store) writeData(id string, write func(io.Writer) error) error {
-	stale, err := filepath.Glob(s.path(sessionsDir, id, "data.age.*"))
-	if err != nil {
+	dir := s.path(sessionsDir, id)
+	pw := &partWriter{dir: dir}
+	if err := errors.Join(write(pw), pw.close()); err != nil {
+		pw.discard()
 		return err
 	}
-	for _, p := range stale {
-		if err := os.Remove(p); err != nil {
+	for i, tmp := range pw.temps {
+		if err := os.Rename(tmp, filepath.Join(dir, partName(i))); err != nil {
+			pw.discard()
 			return err
 		}
 	}
-	pw := &partWriter{dir: s.path(sessionsDir, id)}
-	return errors.Join(write(pw), pw.Close())
+	for i := len(pw.temps); ; i++ {
+		err := os.Remove(filepath.Join(dir, partName(i)))
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
 }
 
-// partWriter writes a stream as data.age, data.age.1, ... of at most
-// partSize bytes each.
+// partWriter writes a stream into temp files of at most partSize bytes.
 type partWriter struct {
-	dir  string
-	n    int      // index of the open part
-	f    *os.File // open part, nil before the first write
-	size int      // bytes in the open part
+	dir   string
+	temps []string // written parts, in order
+	f     *os.File // open part, nil before the first write
+	size  int      // bytes in the open part
 }
 
 func (p *partWriter) Write(b []byte) (int, error) {
@@ -107,16 +120,18 @@ func (p *partWriter) next() error {
 		if err := p.f.Close(); err != nil {
 			return err
 		}
-		p.n++
 	}
-	f, err := os.OpenFile(filepath.Join(p.dir, partName(p.n)), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	f, err := os.CreateTemp(p.dir, tempPrefix+"*")
+	if err != nil {
+		return err
+	}
 	p.f, p.size = f, 0
-	return err
+	p.temps = append(p.temps, f.Name())
+	return nil
 }
 
-// Close finishes the last part (creating an empty data.age if nothing was
-// written).
-func (p *partWriter) Close() error {
+// close finishes the last part (an empty one if nothing was written).
+func (p *partWriter) close() error {
 	if p.f == nil {
 		if err := p.next(); err != nil {
 			return err
@@ -125,7 +140,15 @@ func (p *partWriter) Close() error {
 	return p.f.Close()
 }
 
-// Remove deletes one session from the clone; Commit stages the deletion.
+// discard removes temp parts that weren't renamed into place.
+func (p *partWriter) discard() {
+	for _, t := range p.temps {
+		_ = os.Remove(t)
+	}
+}
+
+// Remove deletes one session from the store's files; Commit and Push
+// share the deletion.
 // It reports whether the session was there.
 func (s *Store) Remove(id string) (bool, error) {
 	if err := checkID(id); err != nil {

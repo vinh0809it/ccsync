@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"os"
@@ -9,8 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vinh-vh/ccsync/internal/crypto"
-	"github.com/vinh-vh/ccsync/internal/testutil"
+	"github.com/vinh0809it/ccsync/internal/crypto"
+	"github.com/vinh0809it/ccsync/internal/session"
+	"github.com/vinh0809it/ccsync/internal/testutil"
 )
 
 const pass = "test-passphrase"
@@ -19,7 +21,7 @@ const pass = "test-passphrase"
 func machine(t *testing.T) *Store {
 	t.Helper()
 	m := testutil.NewMachine(t)
-	return Open(filepath.Join(m.Data, "stores", "test"))
+	return Open(Entry{Name: "test", Dir: filepath.Join(m.Data, "stores", "test")})
 }
 
 // open inits st against remote and returns the unlocked key.
@@ -259,7 +261,7 @@ func TestSyncRefusesNonStore(t *testing.T) {
 	testutil.Git(t, work, "push", "-q", "-u", "origin", "HEAD")
 	os.WriteFile(filepath.Join(work, "uncommitted.txt"), []byte("keep me"), 0o644)
 
-	st := &Store{Dir: work}
+	st := Open(Entry{Dir: work})
 	if err := st.Sync(); err == nil {
 		t.Fatal("Sync ran in a non-ccsync repo")
 	}
@@ -343,25 +345,26 @@ func TestMigrateFromFormat1(t *testing.T) {
 	if _, err := st.Unlock(pass); err != ErrNeedsMigration {
 		t.Fatalf("want ErrNeedsMigration, got %v", err)
 	}
-	wrap := func(b []byte) ([]byte, string, error) { return append([]byte("bundle:"), b...), "h", nil }
-	if _, err := st.Migrate("wrong", wrap); err == nil {
+	if _, err := st.Migrate("wrong"); err == nil {
 		t.Fatal("migrate accepted a wrong passphrase")
 	}
-	if n, err := st.Migrate(pass, wrap); err != nil || n != 1 {
+	if n, err := st.Migrate(pass); err != nil || n != 1 {
 		t.Fatalf("migrate: n=%d err=%v", n, err)
 	}
-	if n, err := st.Migrate(pass, wrap); err != nil || n != 0 {
+	if n, err := st.Migrate(pass); err != nil || n != 0 {
 		t.Fatalf("second migrate should be a no-op: n=%d err=%v", n, err)
 	}
 
 	other := machine(t)
 	key := open(t, other, remote)
 	m, err := other.Find(key, "99999999")
-	if err != nil || m.Title != "old" || m.ContentHash != "h" {
+	if err != nil || m.Title != "old" || m.ContentHash == "" {
 		t.Fatalf("migrated meta: %+v %v", m, err)
 	}
-	if data, _ := payload(t, other, key, id); string(data) != "bundle:raw transcript" {
-		t.Fatalf("migrated payload: %q", data)
+	data, _ := payload(t, other, key, id)
+	c, err := session.Unpack(bytes.NewReader(data))
+	if err != nil || string(c.Transcript) != "raw transcript" {
+		t.Fatalf("migrated bundle: %+v %v", c, err)
 	}
 }
 
@@ -393,7 +396,7 @@ func TestMigrateEmptyFormat1Store(t *testing.T) {
 	if err := st.Init(remote, pass); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := st.Migrate(pass, nil); err != nil || n != 0 {
+	if n, err := st.Migrate(pass); err != nil || n != 0 {
 		t.Fatalf("migrate: n=%d err=%v", n, err)
 	}
 	if _, err := st.Unlock(pass); err != nil {

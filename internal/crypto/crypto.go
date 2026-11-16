@@ -9,6 +9,7 @@ package crypto
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -91,11 +92,19 @@ func (k *Key) DecryptFrom(r io.Reader) (io.Reader, error) {
 	return pr, nil
 }
 
+// ScryptWorkFactor overrides age's scrypt cost (log2 N) for new passphrase
+// blobs when non-zero. Only tests set it — the default cost is what makes
+// guessing a passphrase expensive.
+var ScryptWorkFactor int
+
 // Encrypt encrypts plaintext with the passphrase (scrypt; slow by design).
 func Encrypt(passphrase string, plaintext []byte) ([]byte, error) {
 	recipient, err := age.NewScryptRecipient(passphrase)
 	if err != nil {
 		return nil, err
+	}
+	if ScryptWorkFactor != 0 {
+		recipient.SetWorkFactor(ScryptWorkFactor)
 	}
 	return encrypt(recipient, plaintext)
 }
@@ -107,11 +116,18 @@ func Decrypt(passphrase string, ciphertext []byte) ([]byte, error) {
 		return nil, err
 	}
 	r, err := age.Decrypt(bytes.NewReader(ciphertext), identity)
+	var noMatch *age.NoIdentityMatchError
+	if errors.As(err, &noMatch) {
+		return nil, ErrWrongPassphrase
+	}
 	if err != nil {
-		return nil, fmt.Errorf("decrypt failed (wrong passphrase?): %w", err)
+		return nil, fmt.Errorf("decrypt failed: %w", err)
 	}
 	return io.ReadAll(r)
 }
+
+// ErrWrongPassphrase means the passphrase doesn't open the blob.
+var ErrWrongPassphrase = errors.New("wrong passphrase")
 
 func encrypt(r age.Recipient, plaintext []byte) ([]byte, error) {
 	var buf bytes.Buffer

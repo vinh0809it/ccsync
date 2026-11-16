@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vinh-vh/ccsync/internal/session"
-	"github.com/vinh-vh/ccsync/internal/store"
-	"github.com/vinh-vh/ccsync/internal/testutil"
+	"github.com/vinh0809it/ccsync/internal/session"
+	"github.com/vinh0809it/ccsync/internal/store"
+	"github.com/vinh0809it/ccsync/internal/testutil"
 )
 
 const pass = "app-test-pass"
@@ -22,7 +22,7 @@ const project = "/home/alice/webapp"
 func machine(t *testing.T, remote string) (testutil.Machine, *Client) {
 	t.Helper()
 	m := testutil.NewMachine(t)
-	c, err := Stores{}.Add("test", remote, pass)
+	c, err := Stores{}.Add(NewStore{Name: "test", Location: remote}, pass)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,5 +270,66 @@ func TestBatches(t *testing.T) {
 	want := "[[40] [30] [100] [10 10]]"
 	if fmt.Sprint(sizes) != want {
 		t.Fatalf("batches = %v, want %s", sizes, want)
+	}
+}
+
+// TestPushOverUnreadableStoreCopy: an unreadable store copy is reported,
+// not fatal to the batch, and replaced when overwriting.
+func TestPushOverUnreadableStoreCopy(t *testing.T) {
+	m, c := machine(t, testutil.Remote(t))
+	bad := localSession(t, m, "cdcdcdcd-aaaa-bbbb-cccc-000000000001", `{"type":"user","uuid":"u1"}`)
+	good := localSession(t, m, "cdcdcdcd-aaaa-bbbb-cccc-000000000002", `{"type":"user","uuid":"u1"}`)
+	if _, err := c.Push([]session.Session{bad}, "", PushOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	// Corrupt the store copy's bundle (and publish the corruption).
+	os.WriteFile(filepath.Join(c.Entry.Dir, "sessions", bad.ID, "data.age"), []byte("garbage"), 0o644)
+	testutil.Git(t, c.Entry.Dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "corrupt")
+	testutil.Git(t, c.Entry.Dir, "push", "-q")
+	appendLine(t, bad.File, `{"type":"user","uuid":"u2"}`)
+
+	res, err := c.Push([]session.Session{bad, good}, "", PushOptions{})
+	if err != nil || len(res.Rejected) != 1 || res.Rejected[0].Relation != session.Unknown || len(res.Pushed) != 1 {
+		t.Fatalf("push with an unreadable store copy: %+v %v", res, err)
+	}
+	if res, err := c.Push([]session.Session{bad}, "", PushOptions{Overwrite: true}); err != nil || len(res.Pushed) != 1 {
+		t.Fatalf("overwrite: %+v %v", res, err)
+	}
+}
+
+// TestPullGuards: a session open in Claude Code isn't replaced, and a
+// forced pull keeps the local transcript and companion files.
+func TestPullGuards(t *testing.T) {
+	remote := testutil.Remote(t)
+	a, ca := machine(t, remote)
+	id := "efefefef-aaaa-bbbb-cccc-000000000001"
+	s := localSession(t, a, id, `{"type":"user","uuid":"u1"}`)
+	if _, err := ca.Push([]session.Session{s}, "", PushOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, cb := machine(t, remote)
+	dest := t.TempDir()
+	res, err := cb.Pull(id, dest, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Continue it here (diverging from the store), with a subagent file,
+	// and leave it "open": just modified.
+	companion := strings.TrimSuffix(res.Target, ".jsonl")
+	testutil.WriteFile(t, filepath.Join(companion, "subagents", "local.jsonl"), "mine\n")
+	data, _ := os.ReadFile(res.Target)
+	os.WriteFile(res.Target, append(data, []byte(`{"type":"user","uuid":"local"}`+"\n")...), 0o600)
+
+	if _, err := cb.Pull(id, dest, false); err == nil || !strings.Contains(err.Error(), "open in Claude Code") {
+		t.Fatalf("pull over an open session: %v", err)
+	}
+	forced, err := cb.Pull(id, dest, true)
+	if err != nil || forced.Backup == "" {
+		t.Fatalf("forced pull: %+v %v", forced, err)
+	}
+	bak := companion + strings.TrimPrefix(forced.Backup, res.Target)
+	if b, err := os.ReadFile(filepath.Join(bak, "subagents", "local.jsonl")); err != nil || string(b) != "mine\n" {
+		t.Fatalf("companion files not backed up at %s: %v", bak, err)
 	}
 }

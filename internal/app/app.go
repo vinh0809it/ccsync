@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/vinh-vh/ccsync/internal/crypto"
-	"github.com/vinh-vh/ccsync/internal/store"
+	"github.com/vinh0809it/ccsync/internal/crypto"
+	"github.com/vinh0809it/ccsync/internal/store"
 )
 
 // publishAttempts bounds retries when other machines keep pushing first.
@@ -24,8 +24,9 @@ type Client struct {
 	key   *crypto.Key
 }
 
-// unlock syncs the store and opens it with the passphrase.
-func unlock(e store.Entry, st *store.Store, passphrase string) (*Client, error) {
+// unlockStore syncs the store and opens it with the passphrase. The caller
+// holds the store's lock.
+func unlockStore(e store.Entry, st *store.Store, passphrase string) (*Client, error) {
 	if err := st.Sync(); err != nil {
 		return nil, err
 	}
@@ -36,19 +37,34 @@ func unlock(e store.Entry, st *store.Store, passphrase string) (*Client, error) 
 	return &Client{Entry: e, store: st, key: key}, nil
 }
 
+// locked runs f under the store's lock: one ccsync process at a time (the
+// GUI and a CLI command, say) syncs, writes and publishes a store.
+func (c *Client) locked(f func() error) error {
+	unlock, err := c.store.Lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return f()
+}
+
 // List syncs and returns the store's sessions, plus the ids of entries it
 // can't read.
 func (c *Client) List() (metas []store.Meta, unreadable []string, err error) {
-	if err := c.store.Sync(); err != nil {
-		return nil, nil, err
-	}
-	return c.store.List(c.key)
+	err = c.locked(func() error {
+		if err := c.store.Sync(); err != nil {
+			return err
+		}
+		metas, unreadable, err = c.store.List(c.key)
+		return err
+	})
+	return metas, unreadable, err
 }
 
-// publish stages changes on a freshly synced clone, commits and pushes
+// publish stages changes on a freshly synced store, commits and pushes
 // them. When another machine pushes first, everything is redone on top of
 // its push. stage returns how many sessions it changed; zero means there is
-// nothing to publish.
+// nothing to publish. The caller holds the lock.
 func (c *Client) publish(message func(n int) string, stage func() (int, error)) error {
 	for attempt := 1; ; attempt++ {
 		if err := c.store.Sync(); err != nil {
@@ -72,8 +88,17 @@ func (c *Client) publish(message func(n int) string, stage func() (int, error)) 
 }
 
 // Remove deletes sessions, given by (possibly abbreviated) ids, from the
-// store. Local copies are untouched; the git history keeps old versions.
-func (c *Client) Remove(idPrefixes []string) ([]store.Meta, error) {
+// store. Local copies are untouched; a git store's history keeps old
+// versions.
+func (c *Client) Remove(idPrefixes []string) (removed []store.Meta, err error) {
+	err = c.locked(func() error {
+		removed, err = c.remove(idPrefixes)
+		return err
+	})
+	return removed, err
+}
+
+func (c *Client) remove(idPrefixes []string) ([]store.Meta, error) {
 	if err := c.store.Sync(); err != nil {
 		return nil, err
 	}

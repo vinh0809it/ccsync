@@ -40,22 +40,20 @@ type InstallResult struct {
 // An existing local transcript is replaced only when that loses nothing:
 // when the incoming copy has all of its entries and more (see Compare). If
 // the local copy is newer, has diverged, or can't be compared, Install
-// returns ErrLocalAhead, ErrDiverged or ErrUnknown — unless force is set, in which case the local copy is kept
-// next to it as <id>.jsonl.bak-<unix time>. Each file is written
-// atomically, the transcript last.
+// returns ErrLocalAhead, ErrDiverged or ErrUnknown — unless force is set,
+// in which case the local transcript and companion directory are kept next
+// to them with a .bak-<unix time> suffix. Each file is written atomically,
+// the transcript last.
 func Install(id string, c *Contents, from Origin, destPath string, force bool) (InstallResult, error) {
 	if !ValidID(id) {
 		return InstallResult{}, fmt.Errorf("refusing to install session with unsafe id %q", id)
 	}
-	claudeDir, err := ClaudeDir()
+	target, err := Target(id, destPath)
 	if err != nil {
 		return InstallResult{}, err
 	}
-	dir, err := projectDir(claudeDir, destPath)
-	if err != nil {
-		return InstallResult{}, err
-	}
-	res := InstallResult{Target: filepath.Join(dir, id+".jsonl")}
+	dir := filepath.Dir(target)
+	res := InstallResult{Target: target}
 	sessionDir := filepath.Join(dir, id)
 
 	relocate := func(b []byte) []byte {
@@ -83,9 +81,16 @@ func Install(id string, c *Contents, from Origin, destPath string, force bool) (
 		case !force:
 			return res, ErrDiverged
 		default:
-			res.Backup = fmt.Sprintf("%s.bak-%d", res.Target, time.Now().Unix())
+			// Forced over a copy with entries of its own: keep all of it.
+			stamp := time.Now().Unix()
+			res.Backup = fmt.Sprintf("%s.bak-%d", res.Target, stamp)
 			if err := writeAtomic(res.Backup, existing); err != nil {
 				return res, err
+			}
+			if _, err := os.Stat(sessionDir); err == nil {
+				if err := os.Rename(sessionDir, fmt.Sprintf("%s.bak-%d", sessionDir, stamp)); err != nil {
+					return res, err
+				}
 			}
 		}
 	}
@@ -136,4 +141,20 @@ func writeAtomic(p string, data []byte) error {
 		return err
 	}
 	return nil
+}
+
+// Target returns where Install puts session id for the project at destPath.
+func Target(id, destPath string) (string, error) {
+	if !ValidID(id) {
+		return "", fmt.Errorf("refusing to install session with unsafe id %q", id)
+	}
+	claudeDir, err := ClaudeDir()
+	if err != nil {
+		return "", err
+	}
+	dir, err := projectDir(claudeDir, destPath)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, id+".jsonl"), nil
 }

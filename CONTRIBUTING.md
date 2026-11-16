@@ -22,17 +22,28 @@ CI runs the same checks plus `go test -race` and `govulncheck`.
 main.go                 entry point; stamps the version
 internal/cli            command line: parsing, prompts, output
 internal/gui            local web UI: HTTP API (server.go, handlers.go) and index.html
-internal/app            operations shared by CLI and GUI (push, pull, remove, migrate)
-internal/store          the encrypted git store: clone, sync, format, migration
-internal/session        Claude Code's local storage: discovery, bundling, relocation, install
+internal/app            operations shared by CLI and GUI: Stores (add, unlock,
+                        forget), Client (push, pull, remove) — the fast-forward
+                        rules and the store lock live here
+internal/store          an encrypted store: format, sessions, migration, the
+                        registry of stores, and its transports (git.go,
+                        transport.go: synced folder), process lock
+internal/session        Claude Code's local storage: discovery, bundling,
+                        comparing copies, relocation, install
 internal/crypto         age encryption and the passphrase-wrapped store key
+internal/github         creating private repos and checking visibility via gh
 internal/testutil       test helpers: temp git remotes, simulated machines, fixtures
-build/, packaging/      release builds: dist.sh (browser binaries), desktop.sh (native apps), macOS bundle, Linux installer
+build/, packaging/      release builds: dist.sh (browser binaries), desktop.sh
+                        (native apps), macOS bundle, Linux installer
 ```
 
-Dependencies point one way: `cli` → `gui` → `app` → `store` → `session`, `crypto`.
-Front-ends read listings from `store` and `session` but change state only
-through `app`, so the CLI and GUI behave identically.
+Dependencies point one way: `cli` → `gui` → `app` → `store` → `session` →
+`crypto`, with `github` used by `app`. Front-ends read listings but change
+state only through `app`, so the CLI and GUI behave identically.
+
+A new kind of store (S3, WebDAV, ...) is a new `transport` in
+`internal/store`: the store's files and rules stay the same; only how a
+directory of them is shared changes.
 
 ## Ground rules
 

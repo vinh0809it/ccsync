@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/vinh-vh/ccsync/internal/session"
-	"github.com/vinh-vh/ccsync/internal/store"
+	"github.com/vinh0809it/ccsync/internal/session"
+	"github.com/vinh0809it/ccsync/internal/store"
 )
 
 // ActiveGrace is how recently a session may have been modified before it
@@ -21,8 +21,8 @@ type PushOptions struct {
 	// IncludeActive pushes sessions modified within ActiveGrace.
 	IncludeActive bool
 	// Overwrite replaces store copies that have messages the local copy
-	// lacks (newer or diverged). The replaced version stays in the store's
-	// git history.
+	// lacks (newer, diverged, or unreadable). In a git store the replaced
+	// version stays in the history.
 	Overwrite bool
 }
 
@@ -59,7 +59,15 @@ const batchBytes = 64 << 20
 // opts.Overwrite is set; up-to-date ones in Skipped; live ones (modified
 // within ActiveGrace) in Active unless opts.IncludeActive is set.
 // fallbackCwd is used when a transcript records no cwd.
-func (c *Client) Push(sessions []session.Session, fallbackCwd string, opts PushOptions) (PushResult, error) {
+func (c *Client) Push(sessions []session.Session, fallbackCwd string, opts PushOptions) (res PushResult, err error) {
+	err = c.locked(func() error {
+		res, err = c.push(sessions, fallbackCwd, opts)
+		return err
+	})
+	return res, err
+}
+
+func (c *Client) push(sessions []session.Session, fallbackCwd string, opts PushOptions) (PushResult, error) {
 	if len(sessions) == 0 {
 		return PushResult{}, fmt.Errorf("nothing to push")
 	}
@@ -132,14 +140,15 @@ func (c *Client) pushBatch(items []pushItem, opts PushOptions) (PushResult, erro
 					continue
 				}
 				if found {
-					// Same entries: the copies differ only in relocated
-					// paths or bookkeeping, e.g. a session pulled to another
-					// path and not continued.
 					rel, err := c.relationToStore(it, existing)
+					if err != nil {
+						rel = session.Unknown // unreadable store copy: needs Overwrite
+					}
 					switch {
-					case err != nil:
-						return 0, err
 					case rel == session.Same:
+						// The copies differ only in relocated paths or
+						// bookkeeping, e.g. a session pulled to another path
+						// and not continued.
 						res.Skipped = append(res.Skipped, it.meta.SessionID)
 						continue
 					case rel != session.Ahead && !opts.Overwrite:

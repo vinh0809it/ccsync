@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vinh-vh/ccsync/internal/testutil"
+	"github.com/vinh0809it/ccsync/internal/testutil"
 )
 
 func TestSlugForPath(t *testing.T) {
@@ -389,5 +389,25 @@ func TestResolveProjectThroughSymlinks(t *testing.T) {
 		if got, err := ResolveProject(in); err != nil || got != want {
 			t.Errorf("ResolveProject(%s) = %s, %v; want %s", in, got, err, want)
 		}
+	}
+}
+
+// TestLongProjectPathAmbiguous: two long paths sharing the kept prefix are
+// told apart by the cwd their sessions recorded.
+func TestLongProjectPathAmbiguous(t *testing.T) {
+	claudeDir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", claudeDir)
+	base := "/home/alice/" + strings.Repeat("deep/", 50)
+	a, b := base+"app-a", base+"app-b"
+	for i, p := range []string{a, b} {
+		folder := SlugForPath(p)[:maxSlug] + "-hash" + string(rune('0'+i))
+		testutil.WriteSession(t, claudeDir, folder, "55555555-aaaa-bbbb-cccc-00000000000"+string(rune('0'+i)), testutil.CwdLine(p))
+	}
+	got, err := projectDir(claudeDir, b)
+	if err != nil || !strings.HasSuffix(got, "-hash1") {
+		t.Fatalf("projectDir(b) = %s, %v; want the folder whose sessions ran in b", got, err)
+	}
+	if _, err := projectDir(claudeDir, base+"app-c"); err == nil {
+		t.Fatal("an unknown long path was guessed")
 	}
 }

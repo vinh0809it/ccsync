@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vinh0809it/ccsync/internal/crypto"
 )
 
 // Remote creates an empty bare git repo and returns its path, usable as a
@@ -58,8 +60,11 @@ type Machine struct {
 }
 
 // NewMachine creates a machine in fresh temp dirs and switches to it.
+// Passphrase hashing is made cheap: the tests are about sync, not about
+// resisting brute force.
 func NewMachine(t *testing.T) Machine {
 	t.Helper()
+	crypto.ScryptWorkFactor = 10
 	base := t.TempDir()
 	m := Machine{
 		Config: filepath.Join(base, "config"),

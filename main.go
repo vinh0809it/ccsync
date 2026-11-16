@@ -5,7 +5,7 @@ package main
 import (
 	"os"
 
-	"github.com/vinh-vh/ccsync/internal/cli"
+	"github.com/vinh0809it/ccsync/internal/cli"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".

@@ -24,9 +24,9 @@ const (
 	companionPrefix = "companion/"
 )
 
-// maxEntry bounds one file in a bundle. Bundles come from other machines;
-// the size is checked before allocating.
-const maxEntry = 4 << 30
+// maxBundle bounds what one bundle may unpack to. Bundles come from other
+// machines; sizes are checked before allocating.
+const maxBundle = 4 << 30
 
 // Contents is an unpacked bundle.
 type Contents struct {
@@ -96,6 +96,7 @@ func Unpack(payload io.Reader) (*Contents, error) {
 		return nil, fmt.Errorf("bad bundle: %w", err)
 	}
 	tr := tar.NewReader(zr)
+	var total int64
 	c := &Contents{Companion: map[string][]byte{}}
 	seenTranscript := false
 	for {
@@ -109,7 +110,7 @@ func Unpack(payload io.Reader) (*Contents, error) {
 		if hdr.Typeflag != tar.TypeReg {
 			return nil, fmt.Errorf("bad bundle: %q is not a regular file", hdr.Name)
 		}
-		if hdr.Size < 0 || hdr.Size > maxEntry {
+		if total += hdr.Size; hdr.Size < 0 || total > maxBundle {
 			return nil, fmt.Errorf("bad bundle: %q has size %d", hdr.Name, hdr.Size)
 		}
 		// Sized up front: growing a buffer to a large transcript would

@@ -1,6 +1,6 @@
-// Package store manages the encrypted git-backed session store.
+// Package store manages an encrypted session store.
 //
-// Repo layout (format 2):
+// Store layout (format 2), the same for every kind of store:
 //
 //	ccsync.json                     plaintext marker {"format": 2}
 //	check.age                       known value encrypted with the passphrase
@@ -8,17 +8,19 @@
 //	sessions/<session-id>/data.age  the session bundle, encrypted to the key
 //	                                (split into data.age.1, .2, ... past 45 MB)
 //	sessions/<session-id>/meta.age  Meta (JSON), encrypted to the key — a
-//	                                public repo leaks nothing but random UUIDs
+//	                                reader of the files learns nothing but
+//	                                random UUIDs
 //
-// A Store is a local clone of that repo, used as a disposable cache of the
-// remote: every operation starts by resetting it to the remote (Sync), so
-// a failed push or an interrupted run can never leave it stuck or hide
-// unpushed work. The source of truth is the remote plus each machine's
-// Claude Code directory.
+// Where the files live depends on the store's kind (see transport):
 //
-// Git auth is delegated entirely to the system `git` (SSH keys or
-// credential helpers the user already has). ccsync never sees or stores
-// credentials.
+//   - git: a local clone of a repo, used as a disposable cache of the
+//     remote. Every operation starts by resetting it to the remote, so a
+//     failed push or an interrupted run can never leave it stuck or hide
+//     unpushed work. Auth is the system git's (SSH keys, or credential
+//     helpers such as `gh auth setup-git`); ccsync never sees credentials.
+//   - folder: a directory that a sync service (Dropbox, iCloud Drive,
+//     Google Drive, OneDrive, Syncthing, a network share, ...) keeps in
+//     step across machines. Files are written atomically and read in place.
 package store
 
 import (
@@ -29,7 +31,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/vinh-vh/ccsync/internal/crypto"
+	"github.com/vinh0809it/ccsync/internal/crypto"
 )
 
 // Format is the store format this version reads and writes.
@@ -66,24 +68,36 @@ type Meta struct {
 	PushedAt      time.Time `json:"pushed_at"`
 }
 
-// Store is the local clone of a store repo.
+// Store is one store as this machine sees it.
 type Store struct {
-	Dir string
+	Dir string // the store's files: the git clone, or the synced folder
 	// Interactive lets git ask for credentials on the terminal. A GUI turns
 	// it off: a prompt there would hang a request nobody can answer.
 	Interactive bool
+
+	lockFile string // serializes ccsync processes using this store
+	t        transport
 }
 
-// Open returns the store whose clone is at dir.
-func Open(dir string) *Store {
-	return &Store{Dir: dir, Interactive: true}
+// Open returns the store described by e.
+func Open(e Entry) *Store {
+	s := &Store{Dir: e.Dir, Interactive: true}
+	if e.Name != "" {
+		s.lockFile, _ = lockPath(e.Name)
+	}
+	if e.Kind == KindFolder {
+		s.t = folderTransport{s}
+	} else {
+		s.t = gitTransport{s}
+	}
+	return s
 }
 
 func (s *Store) path(parts ...string) string {
 	return filepath.Join(append([]string{s.Dir}, parts...)...)
 }
 
-// format returns the clone's store format (0 when there is no marker).
+// format returns the store's format (0 when there is no marker).
 func (s *Store) format() (int, error) {
 	data, err := os.ReadFile(s.path(markerFile))
 	if os.IsNotExist(err) {
@@ -101,32 +115,13 @@ func (s *Store) format() (int, error) {
 	return m.Format, nil
 }
 
-// Init clones (or adopts) the store repo, creates the store if the remote
-// is empty, and verifies the passphrase.
-func (s *Store) Init(repoURL, passphrase string) error {
-	if _, err := os.Stat(s.path(".git")); err != nil {
-		if err := os.MkdirAll(filepath.Dir(s.Dir), 0o700); err != nil {
-			return err
-		}
-		if _, err := s.gitIn(".", "clone", "--quiet", repoURL, s.Dir); err != nil {
-			return err
-		}
-	} else {
-		// A clone already exists: it must track the same remote, or every
-		// later push would silently land in the old repo while config
-		// reports the new one.
-		current, err := s.git("remote", "get-url", "origin")
-		if err != nil {
-			return err
-		}
-		if current != repoURL {
-			return fmt.Errorf("store clone %s tracks %s, not %s — remove that directory (its content lives in the remote) and run init again", s.Dir, current, repoURL)
-		}
-	}
-	if err := s.syncOrReset(); err != nil {
+// Init connects to the store at location (a repo URL, or the folder path
+// for a folder store), creates the store if there is none yet, and
+// verifies the passphrase.
+func (s *Store) Init(location, passphrase string) error {
+	if err := s.t.open(location); err != nil {
 		return err
 	}
-
 	format, err := s.format()
 	if err != nil {
 		return err
@@ -134,77 +129,17 @@ func (s *Store) Init(repoURL, passphrase string) error {
 	_, statErr := os.Stat(s.path(checkFile))
 	switch {
 	case format == 0 && os.IsNotExist(statErr):
-		if err := s.create(passphrase); err != nil {
-			return err
-		}
+		return s.create(passphrase)
 	case format <= 1:
 		// Format 1: verify only; Migrate upgrades it.
-		if err := s.verifyCheck(passphrase); err != nil {
-			return err
-		}
+		return s.verifyCheck(passphrase)
 	default:
-		if _, err := s.Unlock(passphrase); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// Delete removes the local clone. The remote is untouched; this only
-// forgets the store on this machine. It refuses a directory that isn't a
-// ccsync clone, so a wrong path can't delete anything else.
-func (s *Store) Delete() error {
-	if _, err := os.Stat(s.Dir); os.IsNotExist(err) {
-		return nil
-	}
-	_, gitErr := os.Stat(s.path(".git"))
-	_, markerErr := os.Stat(s.path(markerFile))
-	if gitErr != nil || (markerErr != nil && !isEmptyRepo(s)) {
-		return fmt.Errorf("%s doesn't look like a ccsync store clone; not deleting it", s.Dir)
-	}
-	return os.RemoveAll(s.Dir)
-}
-
-// isEmptyRepo reports whether the clone has no commits (an init that never
-// got its first push through).
-func isEmptyRepo(s *Store) bool {
-	_, err := s.git("rev-parse", "--verify", "--quiet", "HEAD")
-	return err != nil
-}
-
-// syncOrReset brings a fresh or reused clone up to date for Init:
-//   - a store upstream: Sync;
-//   - another non-empty repo (e.g. one created with a README): fast-forward
-//     to it, keeping its files, and build the store on top;
-//   - no upstream: the remote must be empty, and whatever an earlier init
-//     left locally (its first push may have been rejected) never reached
-//     it, so it is discarded.
-func (s *Store) syncOrReset() error {
-	if _, err := s.git("rev-parse", "--verify", "--quiet", "@{u}"); err == nil {
-		if _, err := s.git("fetch", "--quiet", "origin"); err != nil {
-			return err
-		}
-		if s.upstreamIsStore() {
-			return s.Sync()
-		}
-		_, err := s.git("merge", "--ff-only", "--quiet", "@{u}")
+		_, err := s.Unlock(passphrase)
 		return err
 	}
-	heads, err := s.git("ls-remote", "--heads", "origin")
-	if err != nil {
-		return err
-	}
-	if heads != "" {
-		return fmt.Errorf("store clone %s is out of step with the remote — remove that directory and run init again", s.Dir)
-	}
-	_, _ = s.git("update-ref", "-d", "HEAD")
-	for _, f := range []string{markerFile, checkFile, keyFile} {
-		_ = os.Remove(s.path(f))
-	}
-	return nil
 }
 
-// create initializes a brand-new store in an empty clone and pushes it.
+// create initializes a brand-new store and publishes it.
 func (s *Store) create(passphrase string) error {
 	key, err := crypto.NewKey()
 	if err != nil {
@@ -213,14 +148,10 @@ func (s *Store) create(passphrase string) error {
 	if err := s.writeKeyFiles(passphrase, key); err != nil {
 		return err
 	}
-	if _, err := s.git("add", "-A", "--", markerFile, checkFile, keyFile); err != nil {
+	if err := s.t.commit("ccsync: initialize store"); err != nil {
 		return err
 	}
-	if _, err := s.git("commit", "--quiet", "-m", "ccsync: initialize store"); err != nil {
-		return err
-	}
-	_, err = s.git("push", "--quiet", "-u", "origin", "HEAD")
-	return err
+	return s.t.push()
 }
 
 // writeKeyFiles writes the current-format marker, check file and wrapped key.
@@ -235,9 +166,9 @@ func (s *Store) writeKeyFiles(passphrase string, key *crypto.Key) error {
 		return err
 	}
 	return errors.Join(
-		os.WriteFile(s.path(markerFile), append(marker, '\n'), 0o644),
-		os.WriteFile(s.path(checkFile), check, 0o644),
-		os.WriteFile(s.path(keyFile), wrapped, 0o644))
+		writeAtomic(s.path(markerFile), append(marker, '\n')),
+		writeAtomic(s.path(checkFile), check),
+		writeAtomic(s.path(keyFile), wrapped))
 }
 
 func (s *Store) verifyCheck(passphrase string) error {
@@ -257,7 +188,7 @@ func (s *Store) Unlock(passphrase string) (*crypto.Key, error) {
 	}
 	switch {
 	case format == 0:
-		return nil, fmt.Errorf("the store is not initialized — run: ccsync init <git-repo-url>")
+		return nil, fmt.Errorf("no ccsync store found in %s — set the store up again", s.Dir)
 	case format == 1:
 		return nil, ErrNeedsMigration
 	case format > Format:
@@ -269,3 +200,41 @@ func (s *Store) Unlock(passphrase string) (*crypto.Key, error) {
 	}
 	return crypto.UnwrapKey(passphrase, blob)
 }
+
+// Sync brings the store up to date with other machines (see transport).
+func (s *Store) Sync() error { return s.t.sync() }
+
+// Commit records staged changes; ErrNothingToCommit when there are none.
+func (s *Store) Commit(message string) error { return s.t.commit(message) }
+
+// Push publishes committed changes; ErrRemoteMoved (wrapped) when another
+// machine pushed first, in which case the caller re-syncs and retries.
+func (s *Store) Push() error { return s.t.push() }
+
+// Forget removes what this machine keeps of the store — for a git store
+// its clone — never the shared copy itself.
+func (s *Store) Forget() error { return s.t.forget() }
+
+// writeAtomic replaces path with data via a temp file and rename, so a
+// crash never leaves a half-written file and a sync service never ships
+// one to other machines.
+func writeAtomic(path string, data []byte) error {
+	f, err := os.CreateTemp(filepath.Dir(path), tempPrefix+"*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	_, werr := f.Write(data)
+	if err := errors.Join(werr, f.Close()); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+// tempPrefix marks files being written; readers and sync ignore them.
+const tempPrefix = ".ccsync-tmp-"

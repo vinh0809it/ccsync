@@ -6,7 +6,7 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/vinh-vh/ccsync/internal/app"
+	"github.com/vinh0809it/ccsync/internal/app"
 )
 
 // unlock asks for the passphrase and opens the selected store.

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vinh-vh/ccsync/internal/testutil"
+	"github.com/vinh0809it/ccsync/internal/testutil"
 )
 
 func TestRegistry(t *testing.T) {
@@ -69,10 +69,10 @@ func TestLegacyConfig(t *testing.T) {
 
 // TestDeleteOnlyRemovesClones: forgetting a store must never delete a
 // directory that isn't its clone.
-func TestDeleteOnlyRemovesClones(t *testing.T) {
+func TestForgetOnlyRemovesClones(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "precious.txt"), []byte("x"), 0o644)
-	if err := Open(dir).Delete(); err == nil {
+	if err := Open(Entry{Dir: dir}).Forget(); err == nil {
 		t.Fatal("deleted a directory that isn't a store clone")
 	}
 	if _, err := os.Stat(filepath.Join(dir, "precious.txt")); err != nil {
@@ -81,7 +81,7 @@ func TestDeleteOnlyRemovesClones(t *testing.T) {
 
 	st := machine(t)
 	open(t, st, testutil.Remote(t))
-	if err := st.Delete(); err != nil {
+	if err := st.Forget(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(st.Dir); !os.IsNotExist(err) {

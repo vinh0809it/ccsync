@@ -6,6 +6,19 @@
 (ccsync 0.1.x can't read a migrated store).
 
 ### Fixed
+- The GUI and a CLI command running at once could corrupt a store's clone;
+  every operation now holds a per-store lock across processes.
+- The GUI token was in the URL handed to the browser (readable by other
+  local users in the process list); the URL now carries a one-time code the
+  page trades for the token. The GUI also checks the Host header and sends
+  CSP and no-referrer headers.
+- `pull --force` backed up only the transcript; the companion directory is
+  kept too. Pull no longer replaces a session Claude Code is writing.
+- One unreadable store copy aborted a whole push; it is now reported (and
+  replaced with `--force`).
+- Forgetting a store whose clone couldn't be removed left it registered.
+- Long project paths sharing a 200-character prefix could be installed into
+  the wrong project's folder.
 - A push the remote rejected (network error, or another machine pushing
   first) left an unpushed commit in the local clone; the next push then
   reported the session "already up to date" and it never reached the
@@ -43,10 +56,16 @@
 - One unreadable store entry no longer hides all the others.
 - Bundles may carry entries a newer ccsync adds; older versions skip them.
 - Git runs with `LC_ALL=C`, and never prompts for credentials from the GUI.
-- Module path is `github.com/vinh-vh/ccsync` (`go install` works).
+- Module path is `github.com/vinh0809it/ccsync` (`go install` works).
 - The GUI API accepts only the intended HTTP method per endpoint.
 
 ### Added
+- Synced-folder stores (`init --folder`, or "Synced folder" in the GUI): keep
+  the store in a folder that Dropbox, iCloud Drive, Google Drive, OneDrive or
+  Syncthing syncs — no git needed.
+- `init --github NAME` (GUI: "New private GitHub repo") creates a private
+  repo through the GitHub CLI; git then uses the `gh` login. Public GitHub
+  repos are refused unless `--allow-public`.
 - Several stores per machine, each with its own name, repo and passphrase:
   `init --name`, `store list|use|forget`, `--store NAME` (or
   `$CCSYNC_STORE`); the GUI picks, adds and switches stores. `store forget`
@@ -69,6 +88,7 @@
   built by the release workflow. `ccsync` with no arguments opens the GUI, so
   every download works on double-click.
 - `ccsync rm` (and a Delete button in the GUI) to remove sessions from the store.
+- `push --include-active`; `--force` now only ever means "overwrite".
 - `ccsync migrate`, `ccsync version`.
 - CI (gofmt, vet, race tests, govulncheck) and tagged releases with checksums.
 

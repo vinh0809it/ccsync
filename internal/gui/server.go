@@ -1,8 +1,10 @@
 // Package gui serves ccsync's local web interface.
 //
-// The server binds to 127.0.0.1 only. Every /api/ request must carry a
-// random per-run token (handed out in the URL the browser is opened with),
-// so other local users on a shared machine cannot drive the API. The
+// The server binds to 127.0.0.1 only and answers only to localhost Host
+// names (no DNS rebinding). Every /api/ request must carry a random per-run
+// token in a header. The token never appears in a URL or a command line,
+// where other local users could read it: the URL the browser is opened with
+// carries a one-time code, which the page exchanges for the token. The
 // unlocked store is held in memory and its key is never written anywhere.
 package gui
 
@@ -20,7 +22,8 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/vinh-vh/ccsync/internal/app"
+	"github.com/vinh0809it/ccsync/internal/app"
+	"github.com/vinh0809it/ccsync/internal/github"
 )
 
 //go:embed index.html
@@ -33,6 +36,11 @@ type Server struct {
 	token  string
 	stores app.Stores
 
+	codeMu sync.Mutex
+	code   string // one-time code for the first page load; "" once used
+
+	github bool // gh is installed and logged in
+
 	// op serializes every request: they all touch the store clone or the
 	// unlocked client, and two git operations must never run at once.
 	op     sync.Mutex
@@ -42,15 +50,30 @@ type Server struct {
 // NewServer returns a server with a fresh token. git never prompts for
 // credentials from it: nobody could answer.
 func NewServer() (*Server, error) {
-	raw := make([]byte, 16)
-	if _, err := rand.Read(raw); err != nil {
+	token, err := randomHex()
+	if err != nil {
 		return nil, err
 	}
-	return &Server{token: hex.EncodeToString(raw), stores: app.Stores{Interactive: false}}, nil
+	code, err := randomHex()
+	if err != nil {
+		return nil, err
+	}
+	return &Server{token: token, code: code, stores: app.Stores{Interactive: false}, github: github.Available()}, nil
+}
+
+func randomHex() (string, error) {
+	raw := make([]byte, 16)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(raw), nil
 }
 
 // Token is the secret every API request must carry.
 func (s *Server) Token() string { return s.token }
+
+// Code is the one-time code that buys the token (see handleSession).
+func (s *Server) Code() string { return s.code }
 
 // Handler routes the page and the API.
 func (s *Server) Handler() http.Handler {
@@ -59,6 +82,7 @@ func (s *Server) Handler() http.Handler {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(indexHTML)
 	})
+	mux.HandleFunc("POST /api/session", s.handleSession)
 	api := func(pattern string, h http.HandlerFunc) {
 		mux.HandleFunc(pattern, s.guard(h))
 	}
@@ -73,16 +97,55 @@ func (s *Server) Handler() http.Handler {
 	api("POST /api/push", s.handlePush)
 	api("POST /api/pull", s.handlePull)
 	api("POST /api/remove", s.handleRemove)
-	return mux
+	return localOnly(mux)
+}
+
+// localOnly rejects requests whose Host isn't this machine (DNS rebinding)
+// and sets security headers on every response.
+func localOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, _, err := net.SplitHostPort(r.Host)
+		if err != nil {
+			host = r.Host
+		}
+		if host != "127.0.0.1" && host != "localhost" && host != "::1" {
+			http.Error(w, "forbidden host", http.StatusForbidden)
+			return
+		}
+		h := w.Header()
+		h.Set("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Cache-Control", "no-store")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// handleSession exchanges the one-time code for the token. It works once:
+// a code someone else read from a process list is useless after the
+// browser (or desktop window) has used it.
+func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Code string `json:"code"`
+	}
+	_ = decode(r, &req)
+	s.codeMu.Lock()
+	valid := s.code != "" && subtle.ConstantTimeCompare([]byte(req.Code), []byte(s.code)) == 1
+	if valid {
+		s.code = ""
+	}
+	s.codeMu.Unlock()
+	if !valid {
+		fail(w, http.StatusForbidden, fmt.Errorf("this link was already used — restart ccsync gui for a new one"))
+		return
+	}
+	ok(w, map[string]string{"token": s.token})
 }
 
 // guard checks the token and serializes the request.
 func (s *Server) guard(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		got := r.Header.Get("X-CCSync-Token")
-		if got == "" {
-			got = r.URL.Query().Get("t")
-		}
 		if subtle.ConstantTimeCompare([]byte(got), []byte(s.token)) != 1 {
 			fail(w, http.StatusForbidden, fmt.Errorf("bad or missing token — reopen the URL ccsync printed"))
 			return
@@ -104,7 +167,7 @@ func Listen(port int) (net.Listener, *Server, string, error) {
 	if err != nil {
 		return nil, nil, "", err
 	}
-	url := fmt.Sprintf("http://%s/?t=%s", ln.Addr().String(), s.token)
+	url := fmt.Sprintf("http://%s/?c=%s", ln.Addr().String(), s.code)
 	return ln, s, url, nil
 }
 

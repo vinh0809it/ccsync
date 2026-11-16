@@ -1,13 +1,15 @@
 package gui
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
-	"github.com/vinh-vh/ccsync/internal/app"
-	"github.com/vinh-vh/ccsync/internal/session"
-	"github.com/vinh-vh/ccsync/internal/store"
+	"github.com/vinh0809it/ccsync/internal/app"
+	"github.com/vinh0809it/ccsync/internal/crypto"
+	"github.com/vinh0809it/ccsync/internal/session"
+	"github.com/vinh0809it/ccsync/internal/store"
 )
 
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
@@ -17,36 +19,52 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type storeInfo struct {
-		Name    string `json:"name"`
-		RepoURL string `json:"repoUrl"`
+		Name     string `json:"name"`
+		Kind     string `json:"kind"`
+		Location string `json:"location"` // repo URL or folder
+	}
+	info := func(e store.Entry) storeInfo {
+		kind := string(e.Kind)
+		if kind == "" {
+			kind = string(store.KindGit)
+		}
+		return storeInfo{e.Name, kind, e.Location()}
 	}
 	stores := make([]storeInfo, 0, len(reg.Stores))
 	for _, e := range reg.Stores {
-		stores = append(stores, storeInfo{e.Name, e.RepoURL})
+		stores = append(stores, info(e))
 	}
 	state := map[string]any{
 		"configured": len(stores) > 0,
 		"stores":     stores,
 		"current":    reg.Current,
 		"unlocked":   s.client != nil,
+		"github":     s.github, // gh is logged in: offer to create a private repo
 	}
 	if s.client != nil {
-		state["store"] = storeInfo{s.client.Entry.Name, s.client.Entry.RepoURL}
+		state["store"] = info(s.client.Entry)
 	}
 	ok(w, state)
 }
 
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name       string `json:"name"`
-		RepoURL    string `json:"repoUrl"`
-		Passphrase string `json:"passphrase"`
+		Name         string `json:"name"`
+		Kind         string `json:"kind"`         // "git" (default) or "folder"
+		Location     string `json:"location"`     // repo URL or folder path
+		CreateGitHub string `json:"createGitHub"` // create this private GitHub repo instead
+		AllowPublic  bool   `json:"allowPublic"`
+		Passphrase   string `json:"passphrase"`
 	}
-	if err := decode(r, &req); err != nil || req.Name == "" || req.RepoURL == "" || req.Passphrase == "" {
-		fail(w, http.StatusBadRequest, fmt.Errorf("name, repoUrl and passphrase are required"))
+	if err := decode(r, &req); err != nil || req.Name == "" || req.Passphrase == "" ||
+		(req.Location == "" && req.CreateGitHub == "") {
+		fail(w, http.StatusBadRequest, fmt.Errorf("name, a repo or folder, and a passphrase are required"))
 		return
 	}
-	client, err := s.stores.Add(req.Name, req.RepoURL, req.Passphrase)
+	client, err := s.stores.Add(app.NewStore{
+		Name: req.Name, Kind: store.Kind(req.Kind), Location: req.Location,
+		CreateGitHubRepo: req.CreateGitHub, AllowPublic: req.AllowPublic,
+	}, req.Passphrase)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err)
 		return
@@ -67,8 +85,12 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 	// A format-1 store is not migrated here: migration locks out machines
 	// still on ccsync 0.1.x, so it is an explicit `ccsync migrate`.
 	client, err := s.stores.Unlock(req.Store, req.Passphrase)
-	if err != nil {
+	if errors.Is(err, crypto.ErrWrongPassphrase) {
 		fail(w, http.StatusForbidden, err)
+		return
+	}
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err)
 		return
 	}
 	s.client = client
@@ -169,11 +191,11 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Slug      string   `json:"slug"`
-		Project   string   `json:"project"` // display path; fallback cwd only
-		IDs       []string `json:"ids"`
-		Force     bool     `json:"force"`     // include active sessions
-		Overwrite bool     `json:"overwrite"` // replace newer or diverged store copies
+		Slug          string   `json:"slug"`
+		Project       string   `json:"project"` // display path; fallback cwd only
+		IDs           []string `json:"ids"`
+		IncludeActive bool     `json:"includeActive"` // push sessions modified in the last 30 s
+		Overwrite     bool     `json:"overwrite"`     // replace newer, diverged or unreadable store copies
 	}
 	if err := decode(r, &req); err != nil || req.Slug == "" || len(req.IDs) == 0 {
 		fail(w, http.StatusBadRequest, fmt.Errorf("slug and ids are required"))
@@ -201,7 +223,7 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 			selected = append(selected, s)
 		}
 	}
-	res, err := s.client.Push(selected, req.Project, app.PushOptions{IncludeActive: req.Force, Overwrite: req.Overwrite})
+	res, err := s.client.Push(selected, req.Project, app.PushOptions{IncludeActive: req.IncludeActive, Overwrite: req.Overwrite})
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err)
 		return

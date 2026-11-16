@@ -6,17 +6,15 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/vinh-vh/ccsync/internal/crypto"
+	"github.com/vinh0809it/ccsync/internal/crypto"
+	"github.com/vinh0809it/ccsync/internal/session"
 )
-
-// ConvertFunc turns a raw format-1 transcript into a bundle and its hash.
-type ConvertFunc func(transcript []byte) (payload []byte, hash string, err error)
 
 // Migrate upgrades a format-1 store to the current format, and converts
 // any session still encrypted the format-1 way (one pushed by an outdated
 // ccsync after an earlier migration). It returns how many sessions were
 // converted. Running it on an up-to-date store is a no-op.
-func (s *Store) Migrate(passphrase string, convert ConvertFunc) (int, error) {
+func (s *Store) Migrate(passphrase string) (int, error) {
 	if err := s.Sync(); err != nil {
 		return 0, err
 	}
@@ -33,7 +31,7 @@ func (s *Store) Migrate(passphrase string, convert ConvertFunc) (int, error) {
 		if _, _, err := s.Lookup(key, id); err == nil {
 			continue // already current
 		}
-		if err := s.convertLegacy(key, passphrase, id, convert); err != nil {
+		if err := s.convertLegacy(key, passphrase, id); err != nil {
 			return 0, fmt.Errorf("session %s: %w", id, err)
 		}
 		converted++
@@ -73,7 +71,7 @@ func (s *Store) migrationKey(passphrase string) (*crypto.Key, error) {
 
 // convertLegacy re-encrypts one format-1 session (passphrase-encrypted raw
 // transcript) as a current-format bundle.
-func (s *Store) convertLegacy(key *crypto.Key, passphrase, id string, convert ConvertFunc) error {
+func (s *Store) convertLegacy(key *crypto.Key, passphrase, id string) error {
 	metaBlob, err1 := os.ReadFile(s.path(sessionsDir, id, "meta.age"))
 	dataBlob, err2 := os.ReadFile(s.path(sessionsDir, id, "data.age"))
 	if err := errors.Join(err1, err2); err != nil {
@@ -91,7 +89,7 @@ func (s *Store) convertLegacy(key *crypto.Key, passphrase, id string, convert Co
 	if err != nil {
 		return err
 	}
-	payload, hash, err := convert(transcript)
+	payload, hash, err := session.Pack(session.Contents{Transcript: transcript})
 	if err != nil {
 		return err
 	}

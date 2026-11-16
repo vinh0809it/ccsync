@@ -130,6 +130,12 @@
   .linkbtn { background: none; border: none; padding: 0; color: var(--accent); font: inherit;
     font-size: 13px; cursor: pointer; }
   .linkbtn:hover { text-decoration: underline; }
+  .seg { display: flex; flex-wrap: wrap; gap: 8px; }
+  .seg label { display: flex; align-items: center; gap: 6px; margin: 0; padding: 7px 12px; border: 1px solid var(--line);
+    border-radius: 10px; color: var(--ink); font-size: 13px; cursor: pointer; background: var(--card2); }
+  .seg label:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+  .seg label:has(input:disabled) { opacity: .5; cursor: not-allowed; }
+  .kindbox .note { margin-top: 10px; }
   .lock-links { display: flex; justify-content: space-between; gap: 12px; margin-top: 18px; }
   .btn.ghost.danger:not(:disabled):hover { border-color: var(--err); color: var(--err); }
   .btn.danger-solid { background: var(--err); color: #fff; }
@@ -241,13 +247,35 @@
       </svg>
     </div>
     <div id="setupBox" class="hidden">
-      <h1>Set up ccsync</h1>
-      <p class="note">Create an empty git repository first. A <b>private</b> repo is recommended —
-        everything is encrypted with your passphrase, but a public repo still shows that you sync and when.
-        Your existing git auth (SSH key / credential helper) is used; ccsync never stores credentials.</p>
-      <label>Git repository URL</label>
-      <input id="repoUrl" type="text" placeholder="git@github.com:you/session-store.git" autocomplete="off"
-        oninput="if(!nameEdited) document.getElementById('storeName').value = nameFromUrl(this.value)">
+      <h1>Set up a store</h1>
+      <p class="note">Your sessions are encrypted with a passphrase before they leave this machine.
+        Every machine you set up with the same store and passphrase can push and pull them.</p>
+      <label>Where to keep it</label>
+      <div class="seg" role="radiogroup">
+        <label><input type="radio" name="kind" value="github" onchange="setupKind()"> New private GitHub repo</label>
+        <label><input type="radio" name="kind" value="git" onchange="setupKind()"> Existing git repo</label>
+        <label><input type="radio" name="kind" value="folder" onchange="setupKind()"> Synced folder</label>
+      </div>
+      <div id="kindGithub" class="kindbox">
+        <p class="note">Created through your GitHub CLI login (<span class="mono">gh</span>), always private.</p>
+        <label>Repository name</label>
+        <input id="ghName" type="text" placeholder="claude-sessions" autocomplete="off"
+          oninput="if(!nameEdited) storeName.value = nameFromUrl(this.value)">
+      </div>
+      <div id="kindGit" class="kindbox">
+        <p class="note">An empty repo (or one with just a README), ideally <b>private</b>. Your existing git
+          login is used — the GitHub CLI, a credential helper or an SSH key; ccsync never stores credentials.</p>
+        <label>Repository URL</label>
+        <input id="repoUrl" type="text" placeholder="https://github.com/you/claude-sessions.git" autocomplete="off"
+          oninput="if(!nameEdited) storeName.value = nameFromUrl(this.value)">
+      </div>
+      <div id="kindFolder" class="kindbox">
+        <p class="note">A folder that Dropbox, iCloud Drive, Google Drive, OneDrive or Syncthing keeps in sync
+          between your machines — no git needed. Pick an empty folder, or the store folder another machine made.</p>
+        <label>Folder</label>
+        <input id="folderPath" type="text" placeholder="~/Dropbox/claude-sessions" autocomplete="off"
+          oninput="if(!nameEdited) storeName.value = nameFromUrl(this.value)">
+      </div>
       <label>Name for this store <span class="muted">(on this machine, e.g. work or personal)</span></label>
       <input id="storeName" type="text" placeholder="default" autocomplete="off" oninput="nameEdited = true">
       <label>Store passphrase</label>
@@ -393,7 +421,19 @@
 <div id="toast"></div>
 
 <script>
-const token = new URLSearchParams(location.search).get('t') || '';
+// The URL carries a one-time code, exchanged here for the API token. The
+// token is kept for this tab only and never appears in a URL.
+let token = sessionStorage.getItem('ccsync-token') || '';
+async function obtainToken() {
+  const code = new URLSearchParams(location.search).get('c');
+  history.replaceState(null, '', '/');
+  if (!code) return;
+  const res = await fetch('/api/session', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (j.ok) { token = j.data.token; sessionStorage.setItem('ccsync-token', token); }
+}
 let state = null, pullTarget = null, localRows = [], storeMetas = [], projectsBySlug = {};
 
 async function api(path, body) {
@@ -475,11 +515,13 @@ function nameFromUrl(url) {
 function showSetup(canGoBack) {
   hideLock();
   nameEdited = false;
-  ['repoUrl', 'storeName', 'setupPass', 'setupPass2'].forEach(id => document.getElementById(id).value = '');
+  ['ghName', 'repoUrl', 'folderPath', 'storeName', 'setupPass', 'setupPass2'].forEach(id => document.getElementById(id).value = '');
+  document.querySelector(`input[name=kind][value=${state.github ? 'github' : 'git'}]`).checked = true;
+  setupKind();
   document.getElementById('setupBack').classList.toggle('hidden', !canGoBack);
   document.getElementById('lock').classList.remove('hidden');
   document.getElementById('setupBox').classList.remove('hidden');
-  document.getElementById('repoUrl').focus();
+
 }
 
 function showUnlock() {
@@ -498,19 +540,31 @@ function showUnlock() {
 function showLockRepo() {
   const name = document.getElementById('unlockStore').value;
   const st = state.stores.find(x => x.name === name);
-  document.getElementById('lockRepo').textContent = st ? st.repoUrl : '';
+  document.getElementById('lockRepo').textContent = st ? st.location : '';
+}
+
+function setupKind() {
+  const kind = document.querySelector('input[name=kind]:checked').value;
+  for (const [k, id] of [['github', 'kindGithub'], ['git', 'kindGit'], ['folder', 'kindFolder']])
+    document.getElementById(id).classList.toggle('hidden', k !== kind);
+  // Creating a GitHub repo needs a logged-in GitHub CLI.
+  document.querySelector('input[name=kind][value=github]').disabled = !state.github;
+  document.getElementById({ github: 'ghName', git: 'repoUrl', folder: 'folderPath' }[kind]).focus();
 }
 
 async function doSetup() {
-  const url = document.getElementById('repoUrl').value.trim();
-  const name = document.getElementById('storeName').value.trim() || nameFromUrl(url);
+  const kind = document.querySelector('input[name=kind]:checked').value;
+  const where = document.getElementById({ github: 'ghName', git: 'repoUrl', folder: 'folderPath' }[kind]).value.trim();
+  const name = document.getElementById('storeName').value.trim() || nameFromUrl(where);
   const p1 = document.getElementById('setupPass').value;
   const p2 = document.getElementById('setupPass2').value;
-  if (!url || !p1) return toast('repo URL and passphrase are required', true);
+  if (!where || !p1) return toast('where to keep the store and a passphrase are required', true);
   if (p1 !== p2) return toast('passphrases do not match', true);
+  const req = { name, passphrase: p1, kind: kind === 'folder' ? 'folder' : 'git' };
+  if (kind === 'github') req.createGitHub = where; else req.location = where;
   busy('setupGo', 'setupSpin', true);
   try {
-    await api('/api/setup', { name, repoUrl: url, passphrase: p1 });
+    await api('/api/setup', req);
     await boot();
   } catch (e) { toast(e.message, true); }
   busy('setupGo', 'setupSpin', false);
@@ -556,7 +610,7 @@ function openMain() {
   selected.clear(); // a switch of store starts clean
   document.getElementById('main').classList.remove('hidden');
   document.getElementById('storeName2').textContent = state.store.name;
-  document.getElementById('storeRepo').textContent = state.store.repoUrl;
+  document.getElementById('storeRepo').textContent = state.store.location;
   loadProjects().then(loadLocal);
   loadStore();
 }
@@ -663,14 +717,14 @@ function allProjectsMode() { return document.getElementById('projectSel').value 
 
 async function confirmPush(overwrite = false, ids = null) {
   const chosen = localRows.filter(s => (ids ? ids.includes(s.ID) : selected.has(s.ID)));
-  const force = chosen.some(s => s.Active);
+  const includeActive = chosen.some(s => s.Active); // the dialog said they'd be included
   busy('pushGo', 'pushSpin', true, 'pushGoLbl', 'Pushing…', 'Push');
   document.getElementById('pushStatus').textContent = 'Encrypting & pushing…';
   try {
     const slug = document.getElementById('projectSel').value;
     const r = await api('/api/push', {
       slug, project: (projectsBySlug[slug] || {}).Path || '',
-      ids: chosen.map(s => s.ID), force, overwrite,
+      ids: chosen.map(s => s.ID), includeActive, overwrite,
     });
     document.getElementById('pushDlg').close();
     selected.clear();
@@ -795,7 +849,7 @@ async function doPull() {
   busy('pullGo', 'pullSpin', false, 'pullGoLbl', 'Pulling…', 'Pull');
 }
 
-boot();
+obtainToken().then(boot);
 </script>
 </body>
 </html>

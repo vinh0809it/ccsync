@@ -8,43 +8,53 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vinh-vh/ccsync/internal/app"
-	"github.com/vinh-vh/ccsync/internal/gui"
-	"github.com/vinh-vh/ccsync/internal/session"
-	"github.com/vinh-vh/ccsync/internal/store"
+	"github.com/vinh0809it/ccsync/internal/app"
+	"github.com/vinh0809it/ccsync/internal/gui"
+	"github.com/vinh0809it/ccsync/internal/session"
+	"github.com/vinh0809it/ccsync/internal/store"
 )
 
 func (c *cli) init(args []string) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
-	name := fs.String("name", "", "name for this store on this machine (default: from the repo name)")
-	if err := c.parseFlags(fs, args, "name"); err != nil {
+	name := fs.String("name", "", "name for this store on this machine (default: from the repo or folder name)")
+	ghRepo := fs.String("github", "", "create this private GitHub repo (`name` or owner/name) through the GitHub CLI")
+	folder := fs.String("folder", "", "keep the store in this synced folder (Dropbox, iCloud Drive, ...) instead of git")
+	allowPublic := fs.Bool("allow-public", false, "accept a public GitHub repo")
+	if err := c.parseFlags(fs, args, "name", "github", "folder"); err != nil {
 		return err
 	}
-	if fs.NArg() != 1 {
-		return fmt.Errorf("%w: expected one repo URL", errUsage)
+	spec := app.NewStore{Name: *name, AllowPublic: *allowPublic}
+	switch {
+	case *folder != "" && *ghRepo == "" && fs.NArg() == 0:
+		spec.Kind, spec.Location = store.KindFolder, *folder
+	case *ghRepo != "" && *folder == "" && fs.NArg() == 0:
+		spec.Kind, spec.CreateGitHubRepo = store.KindGit, *ghRepo
+	case *ghRepo == "" && *folder == "" && fs.NArg() == 1:
+		spec.Kind, spec.Location = store.KindGit, fs.Arg(0)
+	default:
+		return fmt.Errorf("%w: give one of: a repo URL, --github NAME, --folder DIR", errUsage)
 	}
-	url := fs.Arg(0)
-	if *name == "" {
-		*name = nameFromURL(url)
+	if spec.Name == "" {
+		spec.Name = nameFromURL(spec.Location + spec.CreateGitHubRepo)
 	}
-	if err := store.CheckName(*name); err != nil {
+	if err := store.CheckName(spec.Name); err != nil {
 		return fmt.Errorf("%w: %v (choose one with --name)", errUsage, err)
 	}
-	fmt.Fprintln(c.err, "NOTE: everything pushed is encrypted with your passphrase.")
-	fmt.Fprintln(c.err, "      A private repo is still recommended; with a public repo,")
-	fmt.Fprintln(c.err, "      anyone can see THAT you sync and WHEN, but not the content.")
+	fmt.Fprintln(c.err, "Sessions are encrypted with your passphrase before they leave this machine.")
+	fmt.Fprintln(c.err, "Every machine set up with this store and passphrase can push and pull them.")
 	pass, err := c.passphrase(true)
 	if err != nil {
 		return err
 	}
-	if _, err := c.stores().Add(*name, url, pass); err != nil {
-		if errors.Is(err, store.ErrNeedsMigration) {
-			fmt.Fprintf(c.out, "Joined store %q, made by ccsync 0.1.x; run: ccsync migrate\n", *name)
-			return nil
-		}
+	cl, err := c.stores().Add(spec, pass)
+	if errors.Is(err, store.ErrNeedsMigration) {
+		fmt.Fprintf(c.out, "Joined store %q, made by ccsync 0.1.x; run: ccsync migrate\n", spec.Name)
+		return nil
+	}
+	if err != nil {
 		return err
 	}
-	fmt.Fprintf(c.out, "Store %q is ready and selected. Push sessions with: ccsync push --all (from a project dir)\n", *name)
+	fmt.Fprintf(c.out, "Store %q (%s) is ready and selected.\nPush sessions with: ccsync push --all (from a project dir)\n", cl.Entry.Name, cl.Entry.Location())
 	return nil
 }
 
@@ -92,7 +102,7 @@ func (c *cli) storeCmd(args []string) error {
 			if e.Name == reg.Current {
 				mark = "*"
 			}
-			fmt.Fprintf(c.out, "%s %-20s %s\n", mark, e.Name, e.RepoURL)
+			fmt.Fprintf(c.out, "%s %-20s %-6s %s\n", mark, e.Name, kindName(e.Kind), e.Location())
 		}
 		return nil
 	case args[0] == "use" && len(args) == 2:
@@ -142,7 +152,8 @@ func (c *cli) push(args []string) error {
 	proj := projectFlag(fs)
 	all := fs.Bool("all", false, "push every session of the project")
 	allProjects := fs.Bool("all-projects", false, "push every session of every project")
-	force := fs.Bool("force", false, "include active sessions and overwrite store copies that are newer or diverged")
+	force := fs.Bool("force", false, "overwrite store copies that are newer, diverged or unreadable")
+	includeActive := fs.Bool("include-active", false, "also push sessions modified in the last 30 seconds")
 	if err := c.parseFlags(fs, args, "project"); err != nil {
 		return err
 	}
@@ -184,7 +195,7 @@ func (c *cli) push(args []string) error {
 	if err != nil {
 		return err
 	}
-	res, err := client.Push(selected, p, app.PushOptions{IncludeActive: *force, Overwrite: *force})
+	res, err := client.Push(selected, p, app.PushOptions{IncludeActive: *includeActive, Overwrite: *force})
 	for _, m := range res.Pushed {
 		fmt.Fprintf(c.out, "pushed   %s  %s\n", m.SessionID, title(m.Title))
 	}
@@ -192,7 +203,7 @@ func (c *cli) push(args []string) error {
 		fmt.Fprintf(c.out, "rejected %s  %s — %s\n", r.Local.ID, title(r.Local.Title), rejectionReason(r))
 	}
 	for _, s := range res.Active {
-		fmt.Fprintf(c.out, "skipped  %s  %s — active in the last %s (--force to include)\n", s.ID, title(s.Title), app.ActiveGrace)
+		fmt.Fprintf(c.out, "skipped  %s  %s — active in the last %s (--include-active to push it)\n", s.ID, title(s.Title), app.ActiveGrace)
 	}
 	if err != nil {
 		return err
@@ -200,7 +211,7 @@ func (c *cli) push(args []string) error {
 	fmt.Fprintf(c.out, "pushed %d, already up to date %d, rejected %d, active %d.\n",
 		len(res.Pushed), len(res.Skipped), len(res.Rejected), len(res.Active))
 	if len(res.Rejected) > 0 {
-		return fmt.Errorf("%d session(s) not pushed: pull them first, or push with --force to overwrite the store copy (it stays in the store's git history)", len(res.Rejected))
+		return fmt.Errorf("%d session(s) not pushed: pull them first, or push with --force to overwrite the store copy (a git store keeps it in its history)", len(res.Rejected))
 	}
 	if len(res.Active) > 0 && fs.NArg() > 0 {
 		return fmt.Errorf("%d session(s) you named are active and were not pushed", len(res.Active))
@@ -280,7 +291,7 @@ func (c *cli) ls(args []string) error {
 func (c *cli) pull(args []string) error {
 	fs := flag.NewFlagSet("pull", flag.ContinueOnError)
 	to := fs.String("to", "", "project directory to install the session for (required)")
-	force := fs.Bool("force", false, "replace a local copy that is newer or diverged (kept as a .bak file)")
+	force := fs.Bool("force", false, "replace a local copy that is newer, diverged or open in Claude Code (kept as .bak files)")
 	if err := c.parseFlags(fs, args, "to"); err != nil {
 		return err
 	}
@@ -382,4 +393,11 @@ func resolveProject(p string) (string, error) {
 		p = "."
 	}
 	return session.ResolveProject(p)
+}
+
+func kindName(k store.Kind) string {
+	if k == "" {
+		return string(store.KindGit)
+	}
+	return string(k)
 }

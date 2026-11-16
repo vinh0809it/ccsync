@@ -16,15 +16,26 @@ import (
 //
 //	$CCSYNC_CONFIG_DIR/config.json   (default: <OS config dir>/ccsync/config.json)
 //
-// Each store's clone lives under the data directory:
+// A git store's clone, and every store's lock file, live under the data
+// directory:
 //
-//	$CCSYNC_DATA_DIR/stores/<name>   (default: ~/.local/share/ccsync/stores/<name>)
+//	$CCSYNC_DATA_DIR/stores/<name>        (default: ~/.local/share/ccsync/...)
+//	$CCSYNC_DATA_DIR/locks/<name>.lock
 
 // Entry is one store this machine is set up for.
 type Entry struct {
 	Name    string `json:"name"`
-	RepoURL string `json:"repo_url"`
-	Dir     string `json:"dir"` // local clone
+	Kind    Kind   `json:"kind,omitempty"`     // empty means git (0.2 registries)
+	RepoURL string `json:"repo_url,omitempty"` // git stores
+	Dir     string `json:"dir"`                // git: local clone; folder: the synced folder
+}
+
+// Location is where the store is shared: the repo URL, or the folder.
+func (e Entry) Location() string {
+	if e.Kind == KindFolder {
+		return e.Dir
+	}
+	return e.RepoURL
 }
 
 // Registry lists this machine's stores.
@@ -68,7 +79,7 @@ func dataDir() (string, error) {
 	return filepath.Join(home, ".local", "share", "ccsync"), nil
 }
 
-// DefaultDir is where a new store's clone goes.
+// DefaultDir is where a new git store's clone goes.
 func DefaultDir(name string) (string, error) {
 	d, err := dataDir()
 	if err != nil {
@@ -105,7 +116,7 @@ func LoadRegistry() (*Registry, error) {
 			return nil, err
 		}
 		return &Registry{Current: "default", Stores: []Entry{{
-			Name: "default", RepoURL: r.LegacyRepoURL, Dir: filepath.Join(d, "store"),
+			Name: "default", Kind: KindGit, RepoURL: r.LegacyRepoURL, Dir: filepath.Join(d, "store"),
 		}}}, nil
 	}
 	return &r.Registry, nil
@@ -124,7 +135,10 @@ func (r *Registry) Save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(p, append(data, '\n'), 0o600)
+	if err := writeAtomic(p, append(data, '\n')); err != nil {
+		return err
+	}
+	return os.Chmod(p, 0o600)
 }
 
 // Get returns the named store, or the current one when name is empty.

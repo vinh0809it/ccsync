@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vinh-vh/ccsync/internal/session"
-	"github.com/vinh-vh/ccsync/internal/testutil"
+	"github.com/vinh0809it/ccsync/internal/session"
+	"github.com/vinh0809it/ccsync/internal/testutil"
 )
 
 const pass = "gui-test-pass"
@@ -121,7 +121,7 @@ func TestFullFlow(t *testing.T) {
 	if state.Configured || state.Unlocked {
 		t.Fatalf("fresh state should be locked/unconfigured: %+v", state)
 	}
-	e.call(t, "POST", "/api/setup", map[string]string{"name": "test", "repoUrl": e.remote, "passphrase": pass}, true)
+	e.call(t, "POST", "/api/setup", map[string]string{"name": "test", "location": e.remote, "passphrase": pass}, true)
 	json.Unmarshal(e.call(t, "GET", "/api/state", nil, true), &state)
 	if !state.Configured || !state.Unlocked {
 		t.Fatalf("after setup: %+v", state)
@@ -202,7 +202,7 @@ func TestFullFlow(t *testing.T) {
 func TestUnlockRejectsWrongPassphrase(t *testing.T) {
 	e := setup(t)
 	e.start(t)
-	e.call(t, "POST", "/api/setup", map[string]string{"name": "test", "repoUrl": e.remote, "passphrase": pass}, true)
+	e.call(t, "POST", "/api/setup", map[string]string{"name": "test", "location": e.remote, "passphrase": pass}, true)
 
 	e.start(t) // restart: locked again
 	e.call(t, "POST", "/api/unlock", map[string]string{"passphrase": "wrong"}, false)
@@ -216,9 +216,9 @@ func TestStoresFlow(t *testing.T) {
 	e := setup(t)
 	e.start(t)
 	second := testutil.Remote(t)
-	e.call(t, "POST", "/api/setup", map[string]string{"name": "work", "repoUrl": e.remote, "passphrase": "w"}, true)
+	e.call(t, "POST", "/api/setup", map[string]string{"name": "work", "location": e.remote, "passphrase": "w"}, true)
 	e.call(t, "POST", "/api/lock", map[string]string{}, true)
-	e.call(t, "POST", "/api/setup", map[string]string{"name": "home", "repoUrl": second, "passphrase": "h"}, true)
+	e.call(t, "POST", "/api/setup", map[string]string{"name": "home", "location": second, "passphrase": "h"}, true)
 
 	var state struct {
 		Stores   []struct{ Name string }
@@ -251,5 +251,66 @@ func TestStoresFlow(t *testing.T) {
 	json.Unmarshal(e.call(t, "GET", "/api/state", nil, true), &state)
 	if state.Unlocked || len(state.Stores) != 1 || state.Stores[0].Name != "home" {
 		t.Fatalf("after forget: %+v", state)
+	}
+}
+
+// TestTokenNeverInURL: the page gets the token by trading a one-time code;
+// a token in the query string is not accepted; foreign Host names are
+// refused (DNS rebinding).
+func TestTokenNeverInURL(t *testing.T) {
+	s, err := NewServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	exchange := func(code string) (int, string) {
+		res, err := http.Post(srv.URL+"/api/session", "application/json", strings.NewReader(`{"code":"`+code+`"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		var out struct {
+			Data struct{ Token string } `json:"data"`
+		}
+		json.NewDecoder(res.Body).Decode(&out)
+		return res.StatusCode, out.Data.Token
+	}
+	if code, _ := exchange("wrong"); code != http.StatusForbidden {
+		t.Fatalf("wrong code: %d", code)
+	}
+	code := s.Code()
+	if status, tok := exchange(code); status != http.StatusOK || tok != s.Token() {
+		t.Fatalf("exchange: %d %q", status, tok)
+	}
+	if status, _ := exchange(code); status != http.StatusForbidden {
+		t.Fatal("the one-time code worked twice")
+	}
+
+	res, err := http.Get(srv.URL + "/api/state?t=" + s.Token())
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("token in the query string accepted: %d", res.StatusCode)
+	}
+
+	req, _ := http.NewRequest("GET", srv.URL+"/", nil)
+	req.Host = "evil.example:80"
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("foreign Host accepted: %d", res.StatusCode)
+	}
+	res, _ = http.Get(srv.URL + "/")
+	res.Body.Close()
+	if !strings.Contains(res.Header.Get("Content-Security-Policy"), "default-src 'none'") ||
+		res.Header.Get("Referrer-Policy") != "no-referrer" {
+		t.Fatalf("security headers missing: %v", res.Header)
 	}
 }

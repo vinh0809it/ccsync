@@ -51,13 +51,35 @@ func projectDir(claudeDir, absPath string) (string, error) {
 	if len(slug) <= maxSlug {
 		return filepath.Join(root, slug), nil
 	}
+	// Several long paths can share the kept prefix; the right folder is the
+	// one whose sessions ran in absPath.
 	entries, _ := os.ReadDir(root)
+	var candidates []string
 	for _, e := range entries {
 		if e.IsDir() && strings.HasPrefix(e.Name(), slug[:maxSlug]) {
-			return filepath.Join(root, e.Name()), nil
+			candidates = append(candidates, filepath.Join(root, e.Name()))
+		}
+	}
+	if len(candidates) == 1 {
+		return candidates[0], nil
+	}
+	for _, dir := range candidates {
+		if folderCwd(dir) == absPath {
+			return dir, nil
 		}
 	}
 	return "", fmt.Errorf("project path is too long for ccsync to derive Claude Code's folder name: start one Claude Code session in %s first, then retry", absPath)
+}
+
+// folderCwd returns the project path recorded by a session in dir.
+func folderCwd(dir string) string {
+	files, _ := filepath.Glob(filepath.Join(dir, "*.jsonl"))
+	for _, f := range files {
+		if s, err := Load(f); err == nil && s.Cwd != "" {
+			return s.Cwd
+		}
+	}
+	return ""
 }
 
 // ResolveProject returns the absolute, symlink-free form of a project
