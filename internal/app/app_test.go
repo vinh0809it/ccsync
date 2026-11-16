@@ -22,14 +22,7 @@ const project = "/home/alice/webapp"
 func machine(t *testing.T, remote string) (testutil.Machine, *Client) {
 	t.Helper()
 	m := testutil.NewMachine(t)
-	st, err := store.Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Init(remote, pass); err != nil {
-		t.Fatal(err)
-	}
-	c, err := Unlock(st, pass)
+	c, err := Stores{}.Add("test", remote, pass)
 	if err != nil {
 		t.Fatal(err)
 	}

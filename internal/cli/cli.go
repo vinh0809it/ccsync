@@ -30,7 +30,8 @@ type command struct {
 
 // commands is the command table; usage is generated from it.
 var commands = []command{
-	{"init", "<git-repo-url>", "set up this machine against a store repo", (*cli).init},
+	{"init", "<git-repo-url> [--name NAME]", "set up this machine for a store (creating it if the repo is empty)", (*cli).init},
+	{"store", "list | use NAME | forget NAME", "manage this machine's stores", (*cli).storeCmd},
 	{"sessions", "[--project DIR]", "list local sessions of a project", (*cli).sessions},
 	{"push", "<ids...> | --all | --all-projects [--force] [--project DIR]", "encrypt and push sessions to the store", (*cli).push},
 	{"ls", "", "list sessions in the store", (*cli).ls},
@@ -44,17 +45,30 @@ var commands = []command{
 type cli struct {
 	out, err io.Writer
 	ver      string
+	store    string // store to use (--store or $CCSYNC_STORE); empty: the current one
 }
 
 // Run executes the command line args (without the program name) and
 // returns the process exit code. buildVersion is the version stamped at
 // build time, if any.
 func Run(args []string, buildVersion string) int {
-	c := &cli{out: os.Stdout, err: os.Stderr, ver: resolveVersion(buildVersion)}
+	c := &cli{out: os.Stdout, err: os.Stderr, ver: resolveVersion(buildVersion), store: os.Getenv("CCSYNC_STORE")}
 	return c.run(args)
 }
 
 func (c *cli) run(args []string) int {
+	// Global option: --store NAME (or --store=NAME) before the command.
+	if len(args) > 0 {
+		if v, ok := strings.CutPrefix(args[0], "--store="); ok {
+			c.store, args = v, args[1:]
+		} else if args[0] == "--store" {
+			if len(args) < 2 {
+				fmt.Fprintln(c.err, "--store needs a store name")
+				return exitUsage
+			}
+			c.store, args = args[1], args[2:]
+		}
+	}
 	if len(args) == 0 {
 		// Double-clicked (or run bare): open the GUI.
 		fmt.Fprintln(c.err, "Opening the ccsync GUI — run `ccsync help` for the commands.")
@@ -90,12 +104,13 @@ func (c *cli) run(args []string) int {
 }
 
 func (c *cli) usage(w io.Writer) {
-	fmt.Fprint(w, "ccsync — sync Claude Code sessions between machines (encrypted git store)\n\nUsage (with no command, ccsync opens the GUI):\n")
+	fmt.Fprint(w, "ccsync — sync Claude Code sessions between machines (encrypted git store)\n\nUsage: ccsync [--store NAME] <command>   (no command: open the GUI)\n\n")
 	for _, cmd := range commands {
 		fmt.Fprintf(w, "  ccsync %-10s %s\n  %12s %s\n", cmd.name, cmd.args, "", cmd.summary)
 	}
 	fmt.Fprint(w, `
-Session ids may be abbreviated to any unique prefix.
+Session ids may be abbreviated to any unique prefix. Commands use the
+current store unless --store (or $CCSYNC_STORE) names another.
 The passphrase is asked interactively (or read from $CCSYNC_PASSPHRASE).
 Everything in the repo is encrypted; git credentials are never touched —
 pushing and pulling use your existing git auth (SSH key or credential helper).

@@ -18,12 +18,8 @@ const pass = "test-passphrase"
 // machine switches to a fresh simulated computer and opens its store.
 func machine(t *testing.T) *Store {
 	t.Helper()
-	testutil.NewMachine(t)
-	st, err := Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return st
+	m := testutil.NewMachine(t)
+	return Open(filepath.Join(m.Data, "stores", "test"))
 }
 
 // open inits st against remote and returns the unlocked key.

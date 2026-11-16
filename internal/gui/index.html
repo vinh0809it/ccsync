@@ -127,6 +127,10 @@
     box-shadow: none; }
   .btn.ghost:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
   .btn.sm { padding: 6px 12px; font-size: 13px; }
+  .linkbtn { background: none; border: none; padding: 0; color: var(--accent); font: inherit;
+    font-size: 13px; cursor: pointer; }
+  .linkbtn:hover { text-decoration: underline; }
+  .lock-links { display: flex; justify-content: space-between; gap: 12px; margin-top: 18px; }
   .btn.ghost.danger:not(:disabled):hover { border-color: var(--err); color: var(--err); }
   .btn.danger-solid { background: var(--err); color: #fff; }
 
@@ -242,7 +246,10 @@
         everything is encrypted with your passphrase, but a public repo still shows that you sync and when.
         Your existing git auth (SSH key / credential helper) is used; ccsync never stores credentials.</p>
       <label>Git repository URL</label>
-      <input id="repoUrl" type="text" placeholder="git@github.com:you/session-store.git" autocomplete="off">
+      <input id="repoUrl" type="text" placeholder="git@github.com:you/session-store.git" autocomplete="off"
+        oninput="if(!nameEdited) document.getElementById('storeName').value = nameFromUrl(this.value)">
+      <label>Name for this store <span class="muted">(on this machine, e.g. work or personal)</span></label>
+      <input id="storeName" type="text" placeholder="default" autocomplete="off" oninput="nameEdited = true">
       <label>Store passphrase</label>
       <input id="setupPass" type="password" autocomplete="new-password">
       <label>Confirm passphrase</label>
@@ -250,16 +257,24 @@
       <div class="dlg-foot" style="padding:18px 0 0">
         <button class="btn" id="setupGo" onclick="doSetup()">Set up</button>
         <span id="setupSpin" class="spin hidden"></span>
+        <span style="flex:1"></span>
+        <button class="linkbtn hidden" id="setupBack" onclick="showUnlock()">Back to my stores</button>
       </div>
     </div>
     <div id="unlockBox" class="hidden">
-      <h1>Unlock your store</h1>
-      <p class="note">Connected to <span id="lockRepo" class="mono"></span></p>
+      <h1>Unlock a store</h1>
+      <label>Store</label>
+      <select id="unlockStore" onchange="showLockRepo()"></select>
+      <p class="note" style="margin-top:6px"><span id="lockRepo" class="mono"></span></p>
       <label>Store passphrase</label>
       <input id="unlockPass" type="password" onkeydown="if(event.key==='Enter')doUnlock()">
       <div class="dlg-foot" style="padding:18px 0 0">
         <button class="btn" id="unlockGo" onclick="doUnlock()">Unlock</button>
         <span id="unlockSpin" class="spin hidden"></span>
+      </div>
+      <div class="lock-links">
+        <button class="linkbtn" onclick="showSetup(true)">+ Add or create another store</button>
+        <button class="linkbtn" onclick="forgetStore()">Forgot the passphrase?</button>
       </div>
     </div>
   </div>
@@ -278,7 +293,9 @@
       <div><b>ccsync</b><span>Claude Code sessions</span></div>
     </div>
     <div class="spacer"></div>
-    <div class="chip"><span class="dot"></span><span class="repo mono" id="storeRepo"></span></div>
+    <div class="chip" title="the open store"><span class="dot"></span><b id="storeName2"></b>
+      <span class="repo mono" id="storeRepo"></span></div>
+    <button class="btn ghost sm" onclick="switchStore()">Switch store</button>
   </div>
 
   <div class="wrap">
@@ -432,35 +449,69 @@ const size = n => n >= 1<<20 ? (n/(1<<20)).toFixed(1)+' MB'
   : n >= 1024 ? (n/1024).toFixed(1)+' KB' : n+' B';
 const short = id => (id || '').slice(0, 8);
 
+let nameEdited = false; // the user typed a store name: stop deriving it
+
+function hideLock() {
+  ['lock', 'setupBox', 'unlockBox'].forEach(id => document.getElementById(id).classList.add('hidden'));
+}
+
 async function boot() {
   try { state = await api('/api/state'); }
   catch (e) { toast(e.message, true); return; }
-  if (!state.configured) {
-    document.getElementById('lock').classList.remove('hidden');
-    document.getElementById('setupBox').classList.remove('hidden');
-  } else if (!state.unlocked) {
-    document.getElementById('lock').classList.remove('hidden');
-    document.getElementById('unlockBox').classList.remove('hidden');
-    document.getElementById('lockRepo').textContent = state.repoUrl || '';
-    document.getElementById('unlockPass').focus();
-  } else {
-    openMain();
-  }
+  document.getElementById('main').classList.add('hidden');
+  hideLock();
+  if (!state.configured) showSetup(false);
+  else if (!state.unlocked) showUnlock();
+  else openMain();
+}
+
+// nameFromUrl mirrors the CLI: ".../my-sessions.git" -> "my-sessions".
+function nameFromUrl(url) {
+  const base = url.trim().replace(/\/+$/, '').replace(/\.git$/, '').split(/[\/:\\]/).pop() || '';
+  const name = base.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/^[-_]+|[-_]+$/g, '').slice(0, 32);
+  return /^[a-z0-9]/.test(name) ? name : 'default';
+}
+
+function showSetup(canGoBack) {
+  hideLock();
+  nameEdited = false;
+  ['repoUrl', 'storeName', 'setupPass', 'setupPass2'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('setupBack').classList.toggle('hidden', !canGoBack);
+  document.getElementById('lock').classList.remove('hidden');
+  document.getElementById('setupBox').classList.remove('hidden');
+  document.getElementById('repoUrl').focus();
+}
+
+function showUnlock() {
+  hideLock();
+  const sel = document.getElementById('unlockStore');
+  sel.innerHTML = state.stores.map(st =>
+    `<option value="${esc(st.name)}">${esc(st.name)}</option>`).join('');
+  sel.value = state.current || state.stores[0].name;
+  showLockRepo();
+  document.getElementById('unlockPass').value = '';
+  document.getElementById('lock').classList.remove('hidden');
+  document.getElementById('unlockBox').classList.remove('hidden');
+  document.getElementById('unlockPass').focus();
+}
+
+function showLockRepo() {
+  const name = document.getElementById('unlockStore').value;
+  const st = state.stores.find(x => x.name === name);
+  document.getElementById('lockRepo').textContent = st ? st.repoUrl : '';
 }
 
 async function doSetup() {
   const url = document.getElementById('repoUrl').value.trim();
+  const name = document.getElementById('storeName').value.trim() || nameFromUrl(url);
   const p1 = document.getElementById('setupPass').value;
   const p2 = document.getElementById('setupPass2').value;
   if (!url || !p1) return toast('repo URL and passphrase are required', true);
   if (p1 !== p2) return toast('passphrases do not match', true);
   busy('setupGo', 'setupSpin', true);
   try {
-    await api('/api/setup', { repoUrl: url, passphrase: p1 });
-    state = await api('/api/state');
-    document.getElementById('lock').classList.add('hidden');
-    document.getElementById('setupBox').classList.add('hidden');
-    openMain();
+    await api('/api/setup', { name, repoUrl: url, passphrase: p1 });
+    await boot();
   } catch (e) { toast(e.message, true); }
   busy('setupGo', 'setupSpin', false);
 }
@@ -468,18 +519,44 @@ async function doSetup() {
 async function doUnlock() {
   busy('unlockGo', 'unlockSpin', true);
   try {
-    await api('/api/unlock', { passphrase: document.getElementById('unlockPass').value });
-    state = await api('/api/state');
-    document.getElementById('lock').classList.add('hidden');
-    document.getElementById('unlockBox').classList.add('hidden');
-    openMain();
+    await api('/api/unlock', {
+      store: document.getElementById('unlockStore').value,
+      passphrase: document.getElementById('unlockPass').value,
+    });
+    await boot();
   } catch (e) { toast(e.message, true); }
   busy('unlockGo', 'unlockSpin', false);
 }
 
+async function forgetStore() {
+  const name = document.getElementById('unlockStore').value;
+  const yes = await askConfirm(`Forget “${name}” on this machine?`,
+    'A forgotten passphrase can’t be recovered — that is what end-to-end encryption means. ' +
+    'What you can do is remove this store from this machine and set up a new one:' +
+    '<ul class="pushlist"><li>Your Claude Code sessions here are <b>not</b> touched — push them to the new store.</li>' +
+    '<li>The store’s repo and other machines are not touched.</li>' +
+    '<li>Sessions that exist only in the old store stay unreadable without its passphrase.</li></ul>',
+    'Forget store', true);
+  if (!yes) return;
+  try {
+    await api('/api/forget', { store: name });
+    toast(`Forgot “${name}” on this machine`);
+    await boot();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function switchStore() {
+  try {
+    await api('/api/lock', {});
+    await boot();
+  } catch (e) { toast(e.message, true); }
+}
+
 function openMain() {
+  selected.clear(); // a switch of store starts clean
   document.getElementById('main').classList.remove('hidden');
-  document.getElementById('storeRepo').textContent = state.repoUrl || '';
+  document.getElementById('storeName2').textContent = state.store.name;
+  document.getElementById('storeRepo').textContent = state.store.repoUrl;
   loadProjects().then(loadLocal);
   loadStore();
 }

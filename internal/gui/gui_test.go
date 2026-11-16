@@ -121,7 +121,7 @@ func TestFullFlow(t *testing.T) {
 	if state.Configured || state.Unlocked {
 		t.Fatalf("fresh state should be locked/unconfigured: %+v", state)
 	}
-	e.call(t, "POST", "/api/setup", map[string]string{"repoUrl": e.remote, "passphrase": pass}, true)
+	e.call(t, "POST", "/api/setup", map[string]string{"name": "test", "repoUrl": e.remote, "passphrase": pass}, true)
 	json.Unmarshal(e.call(t, "GET", "/api/state", nil, true), &state)
 	if !state.Configured || !state.Unlocked {
 		t.Fatalf("after setup: %+v", state)
@@ -202,11 +202,54 @@ func TestFullFlow(t *testing.T) {
 func TestUnlockRejectsWrongPassphrase(t *testing.T) {
 	e := setup(t)
 	e.start(t)
-	e.call(t, "POST", "/api/setup", map[string]string{"repoUrl": e.remote, "passphrase": pass}, true)
+	e.call(t, "POST", "/api/setup", map[string]string{"name": "test", "repoUrl": e.remote, "passphrase": pass}, true)
 
 	e.start(t) // restart: locked again
 	e.call(t, "POST", "/api/unlock", map[string]string{"passphrase": "wrong"}, false)
 	e.call(t, "GET", "/api/store", nil, false)
 	e.call(t, "POST", "/api/unlock", map[string]string{"passphrase": pass}, true)
 	e.call(t, "GET", "/api/store", nil, true)
+}
+
+// TestStoresFlow: add two stores, switch between them, forget one.
+func TestStoresFlow(t *testing.T) {
+	e := setup(t)
+	e.start(t)
+	second := testutil.Remote(t)
+	e.call(t, "POST", "/api/setup", map[string]string{"name": "work", "repoUrl": e.remote, "passphrase": "w"}, true)
+	e.call(t, "POST", "/api/lock", map[string]string{}, true)
+	e.call(t, "POST", "/api/setup", map[string]string{"name": "home", "repoUrl": second, "passphrase": "h"}, true)
+
+	var state struct {
+		Stores   []struct{ Name string }
+		Current  string
+		Unlocked bool
+		Store    struct{ Name string }
+	}
+	json.Unmarshal(e.call(t, "GET", "/api/state", nil, true), &state)
+	if len(state.Stores) != 2 || state.Current != "home" || state.Store.Name != "home" {
+		t.Fatalf("state after two setups: %+v", state)
+	}
+
+	// Switch: lock, then unlock the other store with its own passphrase.
+	e.call(t, "POST", "/api/lock", map[string]string{}, true)
+	e.call(t, "GET", "/api/store", nil, false)
+	e.call(t, "POST", "/api/unlock", map[string]string{"store": "work", "passphrase": "h"}, false)
+	e.call(t, "POST", "/api/unlock", map[string]string{"store": "work", "passphrase": "w"}, true)
+	json.Unmarshal(e.call(t, "GET", "/api/state", nil, true), &state)
+	if state.Store.Name != "work" || state.Current != "work" {
+		t.Fatalf("after switching: %+v", state)
+	}
+
+	// Forgetting the open store locks the UI and removes it from the list.
+	// A machine without any Claude Code project yet lists an empty array.
+	if got := string(e.call(t, "GET", "/api/projects", nil, true)); got != "[]" {
+		t.Fatalf("projects on an empty machine = %s, want []", got)
+	}
+
+	e.call(t, "POST", "/api/forget", map[string]string{"store": "work"}, true)
+	json.Unmarshal(e.call(t, "GET", "/api/state", nil, true), &state)
+	if state.Unlocked || len(state.Stores) != 1 || state.Stores[0].Name != "home" {
+		t.Fatalf("after forget: %+v", state)
+	}
 }

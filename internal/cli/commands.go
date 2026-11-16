@@ -16,11 +16,19 @@ import (
 
 func (c *cli) init(args []string) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
-	if err := c.parseFlags(fs, args); err != nil {
+	name := fs.String("name", "", "name for this store on this machine (default: from the repo name)")
+	if err := c.parseFlags(fs, args, "name"); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
 		return fmt.Errorf("%w: expected one repo URL", errUsage)
+	}
+	url := fs.Arg(0)
+	if *name == "" {
+		*name = nameFromURL(url)
+	}
+	if err := store.CheckName(*name); err != nil {
+		return fmt.Errorf("%w: %v (choose one with --name)", errUsage, err)
 	}
 	fmt.Fprintln(c.err, "NOTE: everything pushed is encrypted with your passphrase.")
 	fmt.Fprintln(c.err, "      A private repo is still recommended; with a public repo,")
@@ -29,19 +37,78 @@ func (c *cli) init(args []string) error {
 	if err != nil {
 		return err
 	}
-	st, err := store.Open()
-	if err != nil {
-		return err
-	}
-	if _, err := app.Setup(st, fs.Arg(0), pass); err != nil {
+	if _, err := c.stores().Add(*name, url, pass); err != nil {
 		if errors.Is(err, store.ErrNeedsMigration) {
-			fmt.Fprintln(c.out, "Joined a store made by ccsync 0.1.x; run: ccsync migrate")
+			fmt.Fprintf(c.out, "Joined store %q, made by ccsync 0.1.x; run: ccsync migrate\n", *name)
 			return nil
 		}
 		return err
 	}
-	fmt.Fprintln(c.out, "ccsync is ready. Push sessions with: ccsync push --all (from a project dir)")
+	fmt.Fprintf(c.out, "Store %q is ready and selected. Push sessions with: ccsync push --all (from a project dir)\n", *name)
 	return nil
+}
+
+// nameFromURL derives a store name from a repo URL: ".../my-sessions.git"
+// gives "my-sessions".
+func nameFromURL(url string) string {
+	base := strings.TrimSuffix(strings.TrimRight(url, "/"), ".git")
+	if i := strings.LastIndexAny(base, "/:\\"); i >= 0 {
+		base = base[i+1:]
+	}
+	var b strings.Builder
+	for _, r := range strings.ToLower(base) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('-')
+		}
+	}
+	name := strings.Trim(b.String(), "-_")
+	if len(name) > 32 {
+		name = name[:32]
+	}
+	if store.CheckName(name) != nil {
+		return "default"
+	}
+	return name
+}
+
+func (c *cli) storeCmd(args []string) error {
+	if len(args) == 0 {
+		args = []string{"list"}
+	}
+	switch {
+	case args[0] == "list" && len(args) == 1:
+		reg, err := c.stores().List()
+		if err != nil {
+			return err
+		}
+		if len(reg.Stores) == 0 {
+			return store.ErrNoStore
+		}
+		for _, e := range reg.Stores {
+			mark := " "
+			if e.Name == reg.Current {
+				mark = "*"
+			}
+			fmt.Fprintf(c.out, "%s %-20s %s\n", mark, e.Name, e.RepoURL)
+		}
+		return nil
+	case args[0] == "use" && len(args) == 2:
+		if err := c.stores().Use(args[1]); err != nil {
+			return err
+		}
+		fmt.Fprintf(c.out, "Using store %q.\n", args[1])
+		return nil
+	case args[0] == "forget" && len(args) == 2:
+		if err := c.stores().Forget(args[1]); err != nil {
+			return err
+		}
+		fmt.Fprintf(c.out, "Forgot store %q on this machine. Its repo, other machines and your local sessions are untouched.\n", args[1])
+		return nil
+	}
+	return fmt.Errorf("%w: unknown store command", errUsage)
 }
 
 func (c *cli) sessions(args []string) error {
@@ -88,7 +155,7 @@ func (c *cli) push(args []string) error {
 	if modes != 1 {
 		return fmt.Errorf("%w: pass session ids (see: ccsync sessions), --all or --all-projects", errUsage)
 	}
-	if _, err := store.LoadConfig(); err != nil {
+	if err := c.requireStore(); err != nil {
 		return err
 	}
 
@@ -270,7 +337,7 @@ func (c *cli) migrate(args []string) error {
 	if err := c.parseFlags(fs, args); err != nil {
 		return err
 	}
-	if _, err := store.LoadConfig(); err != nil {
+	if err := c.requireStore(); err != nil {
 		return err
 	}
 	fmt.Fprintln(c.err, "NOTE: after migrating, ccsync 0.1.x can no longer read this store —")
@@ -279,11 +346,7 @@ func (c *cli) migrate(args []string) error {
 	if err != nil {
 		return err
 	}
-	st, err := store.Open()
-	if err != nil {
-		return err
-	}
-	n, err := app.Migrate(st, pass)
+	n, err := c.stores().Migrate(c.store, pass)
 	if err != nil {
 		return err
 	}

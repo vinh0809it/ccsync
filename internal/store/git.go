@@ -45,7 +45,7 @@ func (s *Store) Sync() error {
 	}
 	// Sync discards local changes: be sure this is a ccsync store first.
 	if !s.upstreamIsStore() {
-		return fmt.Errorf("%s does not track a ccsync store (no %s upstream) — check CCSYNC_STORE_DIR or run ccsync init", s.Dir, markerFile)
+		return fmt.Errorf("%s does not track a ccsync store (no %s upstream) — forget it (ccsync store forget) and set it up again", s.Dir, markerFile)
 	}
 	if _, err := s.git("reset", "--hard", "--quiet", "@{u}"); err != nil {
 		return err

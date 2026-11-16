@@ -7,23 +7,31 @@ import (
 	"golang.org/x/term"
 
 	"github.com/vinh-vh/ccsync/internal/app"
-	"github.com/vinh-vh/ccsync/internal/store"
 )
 
-// unlock asks for the passphrase and opens the configured store.
+// unlock asks for the passphrase and opens the selected store.
 func (c *cli) unlock() (*app.Client, error) {
-	if _, err := store.LoadConfig(); err != nil {
+	if err := c.requireStore(); err != nil {
 		return nil, err
 	}
 	pass, err := c.passphrase(false)
 	if err != nil {
 		return nil, err
 	}
-	st, err := store.Open()
+	return c.stores().Unlock(c.store, pass)
+}
+
+func (c *cli) stores() app.Stores { return app.Stores{Interactive: true} }
+
+// requireStore fails early — before any prompt — when the selected store
+// isn't set up.
+func (c *cli) requireStore() error {
+	reg, err := c.stores().List()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return app.Unlock(st, pass)
+	_, err = reg.Get(c.store)
+	return err
 }
 
 // passphrase reads $CCSYNC_PASSPHRASE, or prompts on the terminal without

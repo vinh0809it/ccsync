@@ -47,6 +47,12 @@
 - The GUI API accepts only the intended HTTP method per endpoint.
 
 ### Added
+- Several stores per machine, each with its own name, repo and passphrase:
+  `init --name`, `store list|use|forget`, `--store NAME` (or
+  `$CCSYNC_STORE`); the GUI picks, adds and switches stores. `store forget`
+  (GUI: "Forgot the passphrase?") removes a store from this machine only, the
+  way out of a lost passphrase. Machines set up by 0.1 keep working as the
+  store "default".
 - Push and pull are fast-forward only: by comparing message ids (and renames), an outdated
   copy can no longer overwrite a newer one, and a session continued on two
   machines is reported instead of silently losing one side. `--force`

@@ -32,7 +32,10 @@ On every machine, with the same repo and the same passphrase:
 ccsync init git@github.com:you/my-session-store.git
 ```
 
-The repo should be empty the first time (create it private on GitHub/GitLab/…).
+The store gets a name on this machine, taken from the repo (`my-session-store`)
+unless you pass `--name`; see [several stores](#several-stores-and-a-forgotten-passphrase).
+The repo should be empty the first time, or hold only a README (create it
+private on GitHub/GitLab/…).
 Each machine needs its own git access to it — ccsync uses your existing SSH
 key or credential helper and never sees or stores credentials.
 
@@ -55,9 +58,9 @@ cd ~/dev/myproject && claude --resume <id>
 (Claude Code may still be writing them). `--project <dir>` targets a project
 other than the current directory. The
 passphrase is prompted, or read from `$CCSYNC_PASSPHRASE` for scripting.
-`CCSYNC_CONFIG_DIR` / `CCSYNC_STORE_DIR` override the default locations
-(`~/.config/ccsync`, `~/.local/share/ccsync/store`); `CLAUDE_CONFIG_DIR` is
-honoured like Claude Code does.
+`CCSYNC_CONFIG_DIR` / `CCSYNC_DATA_DIR` override where the list of stores and
+their local clones live (`~/.config/ccsync`, `~/.local/share/ccsync`);
+`CLAUDE_CONFIG_DIR` is honoured like Claude Code does.
 
 ### GUI
 
@@ -154,20 +157,30 @@ the conversation doesn't need them.
   symlinks, regular files only).
 - **Git credentials** are never read or stored; ccsync shells out to `git`.
 
-## Passphrases and multiple stores
+## Several stores, and a forgotten passphrase
 
-- **Forgotten passphrase:** there is no recovery — that is what end-to-end
-  encryption means. Your sessions are still on the machines that have them:
-  create a new store repo, `ccsync init` it with a new passphrase on each
-  machine, and push again.
-- **Several stores** (e.g. work and personal, each with its own passphrase):
-  a machine's setup lives in two directories, so point them elsewhere per
-  store:
+A machine can be set up for several stores — say `work` and `personal`, each
+its own repo with its own passphrase. Each has a name on that machine; one is
+current.
 
-  ```sh
-  export CCSYNC_CONFIG_DIR=~/.config/ccsync-work CCSYNC_STORE_DIR=~/.local/share/ccsync-work
-  ccsync init git@github.com:you/work-sessions.git
-  ```
+```sh
+ccsync init git@github.com:you/work-sessions.git --name work
+ccsync init git@github.com:you/personal-sessions.git --name personal
+ccsync store list               # * marks the current store
+ccsync store use work           # switch the current store
+ccsync --store personal ls      # or pick one for a single command ($CCSYNC_STORE works too)
+ccsync store forget work        # remove a store from this machine
+```
+
+In the GUI, the start screen lets you pick a store, add or create another,
+and **Switch store** in the header goes back to it.
+
+**Forgotten passphrase:** there is no recovery — that is what end-to-end
+encryption means. Forget the store on this machine (`ccsync store forget`,
+or **Forgot the passphrase?** in the GUI), set up a new store, and push
+again. Forgetting removes only this machine's registration and local clone:
+your Claude Code sessions, the store's repo and other machines are untouched.
+Sessions that exist only in the old store stay unreadable.
 
 ## Upgrading from 0.1.x
 

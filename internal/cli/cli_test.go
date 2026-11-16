@@ -101,3 +101,47 @@ func mustRun(t *testing.T, args ...string) string {
 	}
 	return out
 }
+
+func TestNameFromURL(t *testing.T) {
+	for url, want := range map[string]string{
+		"git@github.com:me/My.Sessions.git":      "my-sessions",
+		"https://github.com/me/work-store/":      "work-store",
+		`C:\repos\personal.git`:                  "personal",
+		"https://example.com/":                   "example-com",
+		"file:///tmp/" + strings.Repeat("a", 40): strings.Repeat("a", 32),
+		"???":                                    "default",
+	} {
+		if got := nameFromURL(url); got != want {
+			t.Errorf("nameFromURL(%q) = %q, want %q", url, got, want)
+		}
+	}
+}
+
+// TestStoreCommands: two stores, selection by --store and `store use`,
+// and `store forget`.
+func TestStoreCommands(t *testing.T) {
+	t.Setenv("CCSYNC_PASSPHRASE", "cli-test-pass")
+	testutil.NewMachine(t)
+	work, home := testutil.Remote(t), testutil.Remote(t)
+	mustRun(t, "init", work, "--name", "work")
+	mustRun(t, "init", home, "--name", "home")
+
+	out := mustRun(t, "store", "list")
+	if !strings.Contains(out, "* home") || !strings.Contains(out, "  work") {
+		t.Fatalf("store list:\n%s", out)
+	}
+	mustRun(t, "store", "use", "work")
+	if out := mustRun(t, "store"); !strings.Contains(out, "* work") {
+		t.Fatalf("after use:\n%s", out)
+	}
+	if out := mustRun(t, "--store", "home", "ls"); !strings.Contains(out, "store is empty") {
+		t.Fatalf("--store home ls: %q", out)
+	}
+	if code, _, errOut := run(t, "--store", "nope", "ls"); code != exitError || !strings.Contains(errOut, "no store named") {
+		t.Fatalf("unknown store: %d %q", code, errOut)
+	}
+	mustRun(t, "store", "forget", "work")
+	if out := mustRun(t, "store", "list"); strings.Contains(out, "work") || !strings.Contains(out, "* home") {
+		t.Fatalf("after forget:\n%s", out)
+	}
+}

@@ -74,18 +74,9 @@ type Store struct {
 	Interactive bool
 }
 
-// Open returns the store at $CCSYNC_STORE_DIR, or the default location
-// (~/.local/share/ccsync/store).
-func Open() (*Store, error) {
-	dir := os.Getenv("CCSYNC_STORE_DIR")
-	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, err
-		}
-		dir = filepath.Join(home, ".local", "share", "ccsync", "store")
-	}
-	return &Store{Dir: dir, Interactive: true}, nil
+// Open returns the store whose clone is at dir.
+func Open(dir string) *Store {
+	return &Store{Dir: dir, Interactive: true}
 }
 
 func (s *Store) path(parts ...string) string {
@@ -111,7 +102,7 @@ func (s *Store) format() (int, error) {
 }
 
 // Init clones (or adopts) the store repo, creates the store if the remote
-// is empty, verifies the passphrase, and saves the configuration.
+// is empty, and verifies the passphrase.
 func (s *Store) Init(repoURL, passphrase string) error {
 	if _, err := os.Stat(s.path(".git")); err != nil {
 		if err := os.MkdirAll(filepath.Dir(s.Dir), 0o700); err != nil {
@@ -156,7 +147,29 @@ func (s *Store) Init(repoURL, passphrase string) error {
 			return err
 		}
 	}
-	return SaveConfig(&Config{RepoURL: repoURL})
+	return nil
+}
+
+// Delete removes the local clone. The remote is untouched; this only
+// forgets the store on this machine. It refuses a directory that isn't a
+// ccsync clone, so a wrong path can't delete anything else.
+func (s *Store) Delete() error {
+	if _, err := os.Stat(s.Dir); os.IsNotExist(err) {
+		return nil
+	}
+	_, gitErr := os.Stat(s.path(".git"))
+	_, markerErr := os.Stat(s.path(markerFile))
+	if gitErr != nil || (markerErr != nil && !isEmptyRepo(s)) {
+		return fmt.Errorf("%s doesn't look like a ccsync store clone; not deleting it", s.Dir)
+	}
+	return os.RemoveAll(s.Dir)
+}
+
+// isEmptyRepo reports whether the clone has no commits (an init that never
+// got its first push through).
+func isEmptyRepo(s *Store) bool {
+	_, err := s.git("rev-parse", "--verify", "--quiet", "HEAD")
+	return err != nil
 }
 
 // syncOrReset brings a fresh or reused clone up to date for Init:

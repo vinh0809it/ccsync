@@ -11,27 +11,42 @@ import (
 )
 
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
-	cfg, err := store.LoadConfig()
+	reg, err := s.stores.List()
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err)
+		return
+	}
+	type storeInfo struct {
+		Name    string `json:"name"`
+		RepoURL string `json:"repoUrl"`
+	}
+	stores := make([]storeInfo, 0, len(reg.Stores))
+	for _, e := range reg.Stores {
+		stores = append(stores, storeInfo{e.Name, e.RepoURL})
+	}
 	state := map[string]any{
-		"configured": err == nil,
+		"configured": len(stores) > 0,
+		"stores":     stores,
+		"current":    reg.Current,
 		"unlocked":   s.client != nil,
 	}
-	if cfg != nil {
-		state["repoUrl"] = cfg.RepoURL
+	if s.client != nil {
+		state["store"] = storeInfo{s.client.Entry.Name, s.client.Entry.RepoURL}
 	}
 	ok(w, state)
 }
 
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		Name       string `json:"name"`
 		RepoURL    string `json:"repoUrl"`
 		Passphrase string `json:"passphrase"`
 	}
-	if err := decode(r, &req); err != nil || req.RepoURL == "" || req.Passphrase == "" {
-		fail(w, http.StatusBadRequest, fmt.Errorf("repoUrl and passphrase are required"))
+	if err := decode(r, &req); err != nil || req.Name == "" || req.RepoURL == "" || req.Passphrase == "" {
+		fail(w, http.StatusBadRequest, fmt.Errorf("name, repoUrl and passphrase are required"))
 		return
 	}
-	client, err := app.Setup(s.store, req.RepoURL, req.Passphrase)
+	client, err := s.stores.Add(req.Name, req.RepoURL, req.Passphrase)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err)
 		return
@@ -42,20 +57,16 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		Store      string `json:"store"` // empty: the current one
 		Passphrase string `json:"passphrase"`
 	}
 	if err := decode(r, &req); err != nil || req.Passphrase == "" {
 		fail(w, http.StatusBadRequest, fmt.Errorf("passphrase is required"))
 		return
 	}
-	s.unlock(w, req.Passphrase)
-}
-
-// unlock opens the store. A format-1 store is not migrated here:
-// migration locks out machines still on ccsync 0.1.x, so it is an explicit
-// `ccsync migrate`.
-func (s *Server) unlock(w http.ResponseWriter, passphrase string) {
-	client, err := app.Unlock(s.store, passphrase)
+	// A format-1 store is not migrated here: migration locks out machines
+	// still on ccsync 0.1.x, so it is an explicit `ccsync migrate`.
+	client, err := s.stores.Unlock(req.Store, req.Passphrase)
 	if err != nil {
 		fail(w, http.StatusForbidden, err)
 		return
@@ -64,11 +75,39 @@ func (s *Server) unlock(w http.ResponseWriter, passphrase string) {
 	ok(w, nil)
 }
 
+// handleLock forgets the unlocked key, e.g. to switch stores.
+func (s *Server) handleLock(w http.ResponseWriter, r *http.Request) {
+	s.client = nil
+	ok(w, nil)
+}
+
+// handleForget removes a store from this machine (not from its repo).
+func (s *Server) handleForget(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Store string `json:"store"`
+	}
+	if err := decode(r, &req); err != nil || req.Store == "" {
+		fail(w, http.StatusBadRequest, fmt.Errorf("store is required"))
+		return
+	}
+	if s.client != nil && s.client.Entry.Name == req.Store {
+		s.client = nil
+	}
+	if err := s.stores.Forget(req.Store); err != nil {
+		fail(w, http.StatusInternalServerError, err)
+		return
+	}
+	ok(w, nil)
+}
+
 func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 	projects, err := session.ListProjects()
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err)
 		return
+	}
+	if projects == nil {
+		projects = []session.Project{} // JSON [] rather than null
 	}
 	ok(w, projects)
 }

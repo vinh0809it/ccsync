@@ -21,7 +21,6 @@ import (
 	"sync"
 
 	"github.com/vinh-vh/ccsync/internal/app"
-	"github.com/vinh-vh/ccsync/internal/store"
 )
 
 //go:embed index.html
@@ -31,8 +30,8 @@ var errLocked = errors.New("locked — unlock with the store passphrase first")
 
 // Server is the GUI's HTTP API.
 type Server struct {
-	token string
-	store *store.Store
+	token  string
+	stores app.Stores
 
 	// op serializes every request: they all touch the store clone or the
 	// unlocked client, and two git operations must never run at once.
@@ -40,18 +39,14 @@ type Server struct {
 	client *app.Client // set after a successful unlock
 }
 
-// NewServer returns a server for the default store with a fresh token.
+// NewServer returns a server with a fresh token. git never prompts for
+// credentials from it: nobody could answer.
 func NewServer() (*Server, error) {
 	raw := make([]byte, 16)
 	if _, err := rand.Read(raw); err != nil {
 		return nil, err
 	}
-	st, err := store.Open()
-	if err != nil {
-		return nil, err
-	}
-	st.Interactive = false
-	return &Server{token: hex.EncodeToString(raw), store: st}, nil
+	return &Server{token: hex.EncodeToString(raw), stores: app.Stores{Interactive: false}}, nil
 }
 
 // Token is the secret every API request must carry.
@@ -70,6 +65,8 @@ func (s *Server) Handler() http.Handler {
 	api("GET /api/state", s.handleState)
 	api("POST /api/setup", s.handleSetup)
 	api("POST /api/unlock", s.handleUnlock)
+	api("POST /api/lock", s.handleLock)
+	api("POST /api/forget", s.handleForget)
 	api("GET /api/projects", s.handleProjects)
 	api("GET /api/local", s.handleLocal)
 	api("GET /api/store", s.handleStore)

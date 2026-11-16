@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/vinh-vh/ccsync/internal/crypto"
-	"github.com/vinh-vh/ccsync/internal/session"
 	"github.com/vinh-vh/ccsync/internal/store"
 )
 
@@ -20,20 +19,13 @@ var beforePush = func() {}
 
 // Client runs operations against one unlocked store.
 type Client struct {
+	Entry store.Entry // which store
 	store *store.Store
 	key   *crypto.Key
 }
 
-// Setup joins (or creates) the store at repoURL and opens it.
-func Setup(st *store.Store, repoURL, passphrase string) (*Client, error) {
-	if err := st.Init(repoURL, passphrase); err != nil {
-		return nil, err
-	}
-	return Unlock(st, passphrase)
-}
-
-// Unlock syncs the store and opens it with the passphrase.
-func Unlock(st *store.Store, passphrase string) (*Client, error) {
+// unlock syncs the store and opens it with the passphrase.
+func unlock(e store.Entry, st *store.Store, passphrase string) (*Client, error) {
 	if err := st.Sync(); err != nil {
 		return nil, err
 	}
@@ -41,7 +33,7 @@ func Unlock(st *store.Store, passphrase string) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{store: st, key: key}, nil
+	return &Client{Entry: e, store: st, key: key}, nil
 }
 
 // List syncs and returns the store's sessions, plus the ids of entries it
@@ -112,11 +104,4 @@ func (c *Client) Remove(idPrefixes []string) ([]store.Meta, error) {
 		return nil, err
 	}
 	return targets, nil
-}
-
-// Migrate upgrades the store to the current format (see store.Migrate).
-func Migrate(st *store.Store, passphrase string) (int, error) {
-	return st.Migrate(passphrase, func(transcript []byte) ([]byte, string, error) {
-		return session.Pack(session.Contents{Transcript: transcript})
-	})
 }

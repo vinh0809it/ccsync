@@ -51,10 +51,10 @@ func RemoteFiles(t *testing.T, remote string) string {
 	return Git(t, remote, "ls-tree", "-r", "--name-only", "HEAD")
 }
 
-// Machine is one simulated computer: its own ccsync config, store clone
-// and Claude Code directory.
+// Machine is one simulated computer: its own ccsync config, data
+// directory (store clones) and Claude Code directory.
 type Machine struct {
-	Config, Store, Claude string
+	Config, Data, Claude string
 }
 
 // NewMachine creates a machine in fresh temp dirs and switches to it.
@@ -63,7 +63,7 @@ func NewMachine(t *testing.T) Machine {
 	base := t.TempDir()
 	m := Machine{
 		Config: filepath.Join(base, "config"),
-		Store:  filepath.Join(base, "store"),
+		Data:   filepath.Join(base, "data"),
 		Claude: filepath.Join(base, "claude"),
 	}
 	m.Use(t)
@@ -73,7 +73,7 @@ func NewMachine(t *testing.T) Machine {
 // Use points the environment at this machine.
 func (m Machine) Use(t *testing.T) {
 	t.Setenv("CCSYNC_CONFIG_DIR", m.Config)
-	t.Setenv("CCSYNC_STORE_DIR", m.Store)
+	t.Setenv("CCSYNC_DATA_DIR", m.Data)
 	t.Setenv("CLAUDE_CONFIG_DIR", m.Claude)
 }
 
