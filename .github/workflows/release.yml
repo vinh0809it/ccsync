@@ -20,7 +20,7 @@ jobs:
       - run: go test ./...
       - run: go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.7.0
       - run: VERSION="${GITHUB_REF_NAME#v}" ./build/dist.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: binaries
           path: dist/ccsync-*
@@ -42,7 +42,7 @@ jobs:
         run: go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.7.0
       - shell: bash
         run: VERSION="${GITHUB_REF_NAME#v}" ./build/desktop.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: desktop-${{ runner.os }}
           path: dist/ccsync-*
