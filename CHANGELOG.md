@@ -56,6 +56,7 @@
 - One unreadable store entry no longer hides all the others.
 - Bundles may carry entries a newer ccsync adds; older versions skip them.
 - Git runs with `LC_ALL=C`, and never prompts for credentials from the GUI.
+- Building needs Go 1.27.4 or later (`go install` fetches it automatically).
 - Module path is `github.com/vinh0809it/ccsync` (`go install` works).
 - The GUI API accepts only the intended HTTP method per endpoint.
 
