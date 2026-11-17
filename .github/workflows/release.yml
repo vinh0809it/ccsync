@@ -57,6 +57,10 @@ jobs:
           path: dist
           merge-multiple: true
       - run: cd dist && sha256sum ccsync-* > SHA256SUMS
-      - run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes
+      # A tag with a suffix (v1.2.0-rc1) is published as a pre-release.
+      - run: |
+          flags=""
+          case "$GITHUB_REF_NAME" in *-*) flags="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes $flags
         env:
           GH_TOKEN: ${{ github.token }}
