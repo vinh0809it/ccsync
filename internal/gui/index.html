@@ -635,6 +635,9 @@ try { const t = localStorage.getItem('ccsync-theme'); if (t) document.documentEl
           <div class="titlerow">
             <h2><span class="hicon" aria-hidden="true"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/></svg></span>This machine <span class="count" id="localCount"></span></h2>
             <span class="summary" id="localSummary"></span>
+            <button class="btn ghost sm" id="localRefreshBtn" onclick="refreshLocal()">
+              <span id="localRefreshSpin" class="spin hidden"></span><span id="localRefreshLbl">Refresh</span>
+            </button>
           </div>
           <div class="selbox">
             <span class="kind" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span>
@@ -1128,8 +1131,19 @@ function openMain() {
   loadStore();
 }
 
+// refreshLocal rereads this machine's projects and sessions, and compares
+// them with the store again.
+async function refreshLocal() {
+  busy('localRefreshBtn', 'localRefreshSpin', true, 'localRefreshLbl', 'Refreshing…', 'Refresh');
+  await loadProjects();
+  await loadLocal();
+  if (storeLoaded) loadStatus();
+  busy('localRefreshBtn', 'localRefreshSpin', false, 'localRefreshLbl', 'Refreshing…', 'Refresh');
+}
+
 async function loadProjects() {
   const sel = document.getElementById('projectSel');
+  const keep = sel.value; // a refresh stays on the chosen project
   try {
     const projects = (await api('/api/projects'))
       .sort((a, b) => new Date(b.LastUsed) - new Date(a.LastUsed));
@@ -1139,6 +1153,7 @@ async function loadProjects() {
     sel.innerHTML = (projects.length > 1 ? `<option value="*">All projects  ·  ${total} session(s)</option>` : '') +
       projects.map(p =>
         `<option value="${esc(p.Slug)}">${esc(p.Path || p.Slug)}  ·  ${p.Sessions} session(s)</option>`).join('');
+    if (keep && [...sel.options].some(o => o.value === keep)) sel.value = keep;
   } catch (e) { toast(e.message, true); }
 }
 
