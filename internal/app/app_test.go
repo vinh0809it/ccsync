@@ -381,8 +381,8 @@ func TestPullMany(t *testing.T) {
 
 func TestPushReportsProgress(t *testing.T) {
 	m, c := machine(t, testutil.Remote(t))
-	a := localSession(t, m, "77777777-aaaa-bbbb-cccc-0000000000a1")
-	b := localSession(t, m, "77777777-aaaa-bbbb-cccc-0000000000a2")
+	a := localSession(t, m, "77777777-aaaa-bbbb-cccc-0000000000a1", `{"type":"user","uuid":"a1"}`)
+	b := localSession(t, m, "77777777-aaaa-bbbb-cccc-0000000000a2", `{"type":"user","uuid":"b1"}`)
 	var steps []Progress
 	c.OnProgress = func(p Progress) { steps = append(steps, p) }
 
