@@ -269,6 +269,95 @@ func (s *Server) handlePull(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// pullManyRequest selects sessions (none: all) and how their projects move.
+type pullManyRequest struct {
+	IDs   []string    `json:"ids"`
+	Map   app.PathMap `json:"map"`
+	Force bool        `json:"force"`
+}
+
+func (r *pullManyRequest) validate() error {
+	for _, rule := range r.Map {
+		if rule.From == "" || rule.To == "" {
+			return fmt.Errorf("every path mapping needs both a from and a to")
+		}
+	}
+	return nil
+}
+
+// handlePullPlan shows where each selected session would go, plus a
+// suggested mapping for projects from another home directory.
+func (s *Server) handlePullPlan(w http.ResponseWriter, r *http.Request) {
+	if s.client == nil {
+		fail(w, http.StatusForbidden, errLocked)
+		return
+	}
+	var req pullManyRequest
+	if err := decode(r, &req); err != nil {
+		fail(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := req.validate(); err != nil {
+		fail(w, http.StatusBadRequest, err)
+		return
+	}
+	plan, err := s.client.PlanPull(req.IDs, req.Map)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err)
+		return
+	}
+	type row struct {
+		ID          string `json:"id"`
+		Title       string `json:"title"`
+		From        string `json:"from"` // original project path
+		Dest        string `json:"dest"`
+		DestExists  bool   `json:"destExists"`
+		LocalExists bool   `json:"localExists"`
+	}
+	rows := make([]row, 0, len(plan))
+	var cwds []string
+	for _, p := range plan {
+		rows = append(rows, row{p.Meta.SessionID, p.Meta.Title, p.Meta.OriginalCwd, p.Dest, p.DestExists, p.LocalExists})
+		cwds = append(cwds, p.Meta.OriginalCwd)
+	}
+	suggest := app.SuggestPathMap(cwds)
+	if suggest == nil {
+		suggest = app.PathMap{}
+	}
+	ok(w, map[string]any{"plan": rows, "suggest": suggest})
+}
+
+func (s *Server) handlePullMany(w http.ResponseWriter, r *http.Request) {
+	if s.client == nil {
+		fail(w, http.StatusForbidden, errLocked)
+		return
+	}
+	var req pullManyRequest
+	if err := decode(r, &req); err != nil {
+		fail(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := req.validate(); err != nil {
+		fail(w, http.StatusBadRequest, err)
+		return
+	}
+	res, err := s.client.PullMany(req.IDs, req.Map, req.Force)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err)
+		return
+	}
+	type failure struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+		Error string `json:"error"`
+	}
+	failed := make([]failure, 0, len(res.Failed))
+	for _, f := range res.Failed {
+		failed = append(failed, failure{f.ID, f.Title, f.Err.Error()})
+	}
+	ok(w, map[string]any{"pulled": len(res.Pulled), "unchanged": len(res.Unchanged), "failed": failed})
+}
+
 func (s *Server) handleRemove(w http.ResponseWriter, r *http.Request) {
 	if s.client == nil {
 		fail(w, http.StatusForbidden, errLocked)

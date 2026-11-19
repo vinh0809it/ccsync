@@ -314,3 +314,49 @@ func TestTokenNeverInURL(t *testing.T) {
 		t.Fatalf("security headers missing: %v", res.Header)
 	}
 }
+
+// TestPullManyAPI: plan and pull every store session through the API,
+// with a folder mapping.
+func TestPullManyAPI(t *testing.T) {
+	e := setup(t)
+	project := "/home/zz-ghost/dev/web"
+	testutil.WriteSession(t, e.machine.Claude, session.SlugForPath(project), "77770000-aaaa-bbbb-cccc-000000000001",
+		testutil.TitleLine("many"), testutil.CwdLine(project), `{"type":"user","uuid":"u1"}`)
+	e.start(t)
+	e.call(t, "POST", "/api/setup", map[string]string{"name": "s", "location": e.remote, "passphrase": pass}, true)
+	var projects []struct{ Slug string }
+	json.Unmarshal(e.call(t, "GET", "/api/projects", nil, true), &projects)
+	e.call(t, "POST", "/api/push", map[string]any{"slug": projects[0].Slug, "ids": []string{"77770000-aaaa-bbbb-cccc-000000000001"}}, true)
+
+	var plan struct {
+		Plan    []struct{ Dest string }
+		Suggest []struct{ From, To string }
+	}
+	json.Unmarshal(e.call(t, "POST", "/api/pull-plan", map[string]any{}, true), &plan)
+	resolved, _ := session.ResolveProject(project) // D:\home\... on Windows
+	if len(plan.Plan) != 1 || plan.Plan[0].Dest != resolved || len(plan.Suggest) != 1 || plan.Suggest[0].From != "/home/zz-ghost" {
+		t.Fatalf("plan without a mapping: %+v", plan)
+	}
+	dest, _ := session.ResolveProject(filepath.Join(t.TempDir(), "code"))
+	mapping := []map[string]string{{"from": "/home/zz-ghost/dev", "to": dest}}
+	json.Unmarshal(e.call(t, "POST", "/api/pull-plan", map[string]any{"map": mapping}, true), &plan)
+	if plan.Plan[0].Dest != filepath.Join(dest, "web") {
+		t.Fatalf("plan with a mapping: %+v", plan)
+	}
+	e.call(t, "POST", "/api/pull-plan", map[string]any{"map": []map[string]string{{"from": "/x"}}}, false)
+
+	var res struct {
+		Pulled, Unchanged int
+		Failed            []struct{ Error string }
+	}
+	// On this machine the session is still at its own path, so pulling it
+	// elsewhere is a fresh install.
+	json.Unmarshal(e.call(t, "POST", "/api/pull-many", map[string]any{"map": mapping}, true), &res)
+	if res.Pulled != 1 || len(res.Failed) != 0 {
+		t.Fatalf("pull-many: %+v", res)
+	}
+	json.Unmarshal(e.call(t, "POST", "/api/pull-many", map[string]any{"map": mapping}, true), &res)
+	if res.Pulled != 0 || res.Unchanged != 1 {
+		t.Fatalf("second pull-many: %+v", res)
+	}
+}

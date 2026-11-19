@@ -61,6 +61,11 @@
 - The GUI API accepts only the intended HTTP method per endpoint.
 
 ### Added
+- Pull many sessions at once: `pull --all` / `pull <id>...` and **Pull
+  selected** in the GUI, each to its original project path moved by folder
+  mappings (`--map FROM=TO`; the GUI proposes one when the home directory
+  differs and previews every destination). Failures are listed without
+  stopping the rest; `--dry-run` shows the plan.
 - Synced-folder stores (`init --folder`, or "Synced folder" in the GUI): keep
   the store in a folder that Dropbox, iCloud Drive, Google Drive, OneDrive or
   Syncthing syncs — no git needed.

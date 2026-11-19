@@ -333,3 +333,65 @@ func TestPullGuards(t *testing.T) {
 		t.Fatalf("companion files not backed up at %s: %v", bak, err)
 	}
 }
+
+// TestPullMany moves every session of one machine to another whose
+// projects live elsewhere, then re-runs it: nothing changes, and a session
+// continued here meanwhile is reported instead of overwritten.
+func TestPullMany(t *testing.T) {
+	remote := testutil.Remote(t)
+	a, ca := machine(t, remote)
+	var sessions []session.Session
+	for i, proj := range []string{"/home/alice/dev/web", "/home/alice/dev/api", "/home/alice/dev/api"} {
+		id := fmt.Sprintf("12340000-aaaa-bbbb-cccc-00000000000%d", i)
+		file := testutil.WriteSession(t, a.Claude, session.SlugForPath(proj), id,
+			testutil.CwdLine(proj), fmt.Sprintf(`{"type":"user","uuid":"u%d"}`, i))
+		s, _ := session.Load(file)
+		sessions = append(sessions, s)
+	}
+	if _, err := ca.Push(sessions, "", PushOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, cb := machine(t, remote)
+	// Resolved like Claude Code does (macOS /var symlink, Windows short names).
+	code, _ := session.ResolveProject(filepath.Join(t.TempDir(), "code"))
+	m := PathMap{{From: "/home/alice/dev", To: code}}
+	plan, err := cb.PlanPull(nil, m)
+	if err != nil || len(plan) != 3 {
+		t.Fatalf("plan: %+v %v", plan, err)
+	}
+	for _, p := range plan {
+		if filepath.Dir(p.Dest) != code || p.LocalExists {
+			t.Errorf("planned %s -> %s (local=%v)", p.Meta.OriginalCwd, p.Dest, p.LocalExists)
+		}
+	}
+
+	res, err := cb.PullMany(nil, m, false)
+	if err != nil || len(res.Pulled) != 3 || len(res.Failed) != 0 {
+		t.Fatalf("first pull: %+v %v", res, err)
+	}
+	for _, r := range res.Pulled {
+		if r.Dest != filepath.Join(code, filepath.Base(r.Meta.OriginalCwd)) {
+			t.Errorf("%s installed for %s", r.Meta.SessionID, r.Dest)
+		}
+	}
+
+	// Continue one here (newer than the store copy), then pull all again.
+	diverged := res.Pulled[0]
+	data, _ := os.ReadFile(diverged.Target)
+	testutil.WriteFile(t, diverged.Target, string(data)+`{"type":"user","uuid":"here"}`+"\n")
+	again, err := cb.PullMany(nil, m, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again.Unchanged) != 2 || len(again.Failed) != 1 || again.Failed[0].ID != diverged.Meta.SessionID ||
+		!strings.Contains(again.Failed[0].Err.Error(), "has messages the store copy lacks") {
+		t.Fatalf("second pull: pulled=%d unchanged=%d failed=%v", len(again.Pulled), len(again.Unchanged), again.Failed[0].Err)
+	}
+
+	// Selected ids only.
+	sel, err := cb.PullMany([]string{"12340000-aaaa-bbbb-cccc-000000000002"}, m, false)
+	if err != nil || len(sel.Unchanged) != 1 || len(sel.Pulled)+len(sel.Failed) != 0 {
+		t.Fatalf("selected pull: %+v %v", sel, err)
+	}
+}
