@@ -5,98 +5,166 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ccsync</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%235a48f5'/%3E%3Cstop offset='1' stop-color='%237b6bff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='256' height='256' rx='56' fill='url(%23g)'/%3E%3Cg fill='none' stroke='white' stroke-width='18' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M56 128a72 72 0 0 1 123-51l21 21'/%3E%3Cpath d='M200 56v40h-40'/%3E%3Cpath d='M200 128a72 72 0 0 1-123 51l-21-21'/%3E%3Cpath d='M56 200v-40h40'/%3E%3C/g%3E%3C/svg%3E">
+<script>
+// Theme: the page's own choice if one was made, else the system's.
+try { const t = localStorage.getItem('ccsync-theme'); if (t) document.documentElement.dataset.theme = t; } catch {}
+</script>
 <style>
   :root {
-    --bg: #eef1f6; --bg2: #e4e8f0; --card: #ffffff; --card2: #f7f9fc;
-    --ink: #17203a; --muted: #5f6b85; --faint: #8b95ab;
-    --line: #e1e6f0; --line2: #eef1f7;
-    --accent: #5a48f5; --accent2: #7b6bff; --accent-ink: #ffffff;
-    --accent-soft: #ece9ff;
-    --ok: #16875a; --warn: #b3560e; --warn-soft: #fdeede; --err: #c62a2a;
-    --shadow: 0 1px 2px rgba(23,32,58,.06), 0 8px 28px rgba(23,32,58,.08);
-    --shadow-lg: 0 12px 48px rgba(23,32,58,.22);
-    --radius: 16px;
+    color-scheme: light;
+    --bg: #f3f4fa; --bg2: #eceef7; --card: #ffffff; --card2: #f6f7fc;
+    --ink: #141a2e; --muted: #59627a; --faint: #8a92a8;
+    --line: #e2e5f0; --line2: #eef0f7;
+    --accent: #5b47f0; --accent2: #8b5cf6; --accent-ink: #ffffff;
+    --accent-soft: #eeebff;
+    --ok: #127a50; --warn: #a94f0b; --warn-soft: #fdeede; --err: #c42b2b;
+    --shadow: 0 1px 2px rgba(20,26,46,.05), 0 10px 30px -8px rgba(20,26,46,.12);
+    --shadow-lg: 0 18px 60px rgba(20,26,46,.24);
+    --glow1: rgba(91,71,240,.16); --glow2: rgba(236,72,153,.10); --glow3: rgba(14,165,233,.10);
+    --dots: rgba(20,26,46,.07);
+    --radius: 18px;
   }
+  /* Dark: by the system's choice unless the page picked light, or picked dark. */
   @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0c0f17; --bg2: #0f131d; --card: #161b28; --card2: #1c2231;
-      --ink: #eaeef8; --muted: #98a3bd; --faint: #6b7592;
-      --line: #262d3e; --line2: #202636;
-      --accent: #7d6dff; --accent2: #9a8cff; --accent-ink: #0a0d15;
-      --accent-soft: #221f3d;
-      --ok: #4fc98a; --warn: #f0a35e; --warn-soft: #2c2213; --err: #ff6b6b;
-      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 34px rgba(0,0,0,.45);
-      --shadow-lg: 0 16px 60px rgba(0,0,0,.6);
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #090b12; --bg2: #0c0f19; --card: #131827; --card2: #191f31;
+      --ink: #ecefff; --muted: #9aa3bf; --faint: #6c7594;
+      --line: #252c42; --line2: #1d2336;
+      --accent: #8b7bff; --accent2: #c084fc; --accent-ink: #0b0d16;
+      --accent-soft: #241f45;
+      --ok: #4fd08f; --warn: #f2a65f; --warn-soft: #2d2314; --err: #ff6f6f;
+      --shadow: 0 1px 2px rgba(0,0,0,.35), 0 14px 40px -10px rgba(0,0,0,.6);
+      --shadow-lg: 0 20px 70px rgba(0,0,0,.65);
+      --glow1: rgba(139,123,255,.18); --glow2: rgba(236,72,153,.10); --glow3: rgba(14,165,233,.09);
+      --dots: rgba(255,255,255,.05);
     }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #090b12; --bg2: #0c0f19; --card: #131827; --card2: #191f31;
+    --ink: #ecefff; --muted: #9aa3bf; --faint: #6c7594;
+    --line: #252c42; --line2: #1d2336;
+    --accent: #8b7bff; --accent2: #c084fc; --accent-ink: #0b0d16;
+    --accent-soft: #241f45;
+    --ok: #4fd08f; --warn: #f2a65f; --warn-soft: #2d2314; --err: #ff6f6f;
+    --shadow: 0 1px 2px rgba(0,0,0,.35), 0 14px 40px -10px rgba(0,0,0,.6);
+    --shadow-lg: 0 20px 70px rgba(0,0,0,.65);
+    --glow1: rgba(139,123,255,.18); --glow2: rgba(236,72,153,.10); --glow3: rgba(14,165,233,.09);
+    --dots: rgba(255,255,255,.05);
   }
   * { box-sizing: border-box; margin: 0; }
   html, body { height: 100%; }
   body {
-    background:
-      radial-gradient(1200px 600px at 100% -10%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 60%),
-      radial-gradient(1000px 500px at -10% 110%, color-mix(in srgb, var(--accent2) 10%, transparent), transparent 55%),
-      linear-gradient(180deg, var(--bg), var(--bg2));
+    background-color: var(--bg);
+    background-image:
+      radial-gradient(900px 520px at 88% -8%, var(--glow1), transparent 62%),
+      radial-gradient(700px 420px at 0% 0%, var(--glow3), transparent 60%),
+      radial-gradient(800px 520px at 40% 115%, var(--glow2), transparent 60%),
+      radial-gradient(var(--dots) 1px, transparent 1.4px);
+    background-size: auto, auto, auto, 22px 22px;
+    background-attachment: fixed;
     color: var(--ink);
-    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font: 15px/1.55 "Inter", "Segoe UI Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     min-height: 100%;
+    -webkit-font-smoothing: antialiased;
   }
   button { font: inherit; cursor: pointer; border: 0; }
   button:disabled { opacity: .5; cursor: default; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .hidden { display: none !important; }
-  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .mono { font-family: ui-monospace, "JetBrains Mono", SFMono-Regular, Menlo, Consolas, monospace; }
   .muted { color: var(--muted); }
+  .ell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* App bar */
   .appbar {
     position: sticky; top: 0; z-index: 20;
-    display: flex; align-items: center; gap: 14px;
-    padding: 14px clamp(16px, 4vw, 40px);
-    background: color-mix(in srgb, var(--card) 82%, transparent);
-    backdrop-filter: saturate(1.4) blur(14px);
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px clamp(16px, 3vw, 30px);
+    background: color-mix(in srgb, var(--card) 72%, transparent);
+    backdrop-filter: saturate(1.5) blur(16px);
     border-bottom: 1px solid var(--line);
   }
-  .brand { display: flex; align-items: center; gap: 11px; }
+  .brand { display: flex; align-items: center; gap: 12px; flex: none; }
   .logo {
-    width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center;
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
-    box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 45%, transparent);
+    width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; flex: none;
+    background: linear-gradient(135deg, #5b47f0, #8b5cf6 55%, #ec4899);
+    box-shadow: 0 6px 18px rgba(91,71,240,.38), inset 0 1px 0 rgba(255,255,255,.25);
   }
-  .brand b { font-size: 17px; letter-spacing: -.02em; }
-  .brand span { font-size: 12px; color: var(--muted); display: block; margin-top: -2px; }
+  .wordmark { font-size: 21px; font-weight: 800; letter-spacing: -.035em; line-height: 1; }
+  .tagline { font-size: 12.5px; color: var(--muted); padding-left: 12px; border-left: 1px solid var(--line);
+    line-height: 1.25; }
   .spacer { flex: 1; }
-  .brand, .appbar .btn { flex: none; }
-  .chip {
-    display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: min(560px, 55vw);
-    padding: 6px 12px; border-radius: 999px; font-size: 12.5px;
-    background: var(--card2); border: 1px solid var(--line); color: var(--muted);
+  @media (max-width: 760px) { .tagline { display: none; } }
+
+  /* The current store, and the way back to the store list */
+  .storebtn {
+    display: inline-flex; align-items: center; gap: 10px; min-width: 0; max-width: min(360px, 46vw);
+    padding: 5px 8px 5px 5px; border-radius: 12px; text-align: left;
+    background: var(--card); color: var(--ink); border: 1px solid var(--line);
+    box-shadow: 0 1px 2px rgba(0,0,0,.05);
+    transition: border-color .12s, box-shadow .12s, background .12s;
   }
-  .chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none;
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
-  .chip b { color: var(--ink); flex: 0 1 auto; max-width: 220px; }
-  .chip .repo { flex: 1 1 0; min-width: 0; }
-  .chip b, .chip .repo, .ell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  @media (max-width: 720px) { .chip .repo, .brand span { display: none; } }
+  .storebtn:not(:disabled):hover { border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft); }
+  .storebtn .kicon { width: 30px; height: 30px; border-radius: 8px; flex: none; display: grid;
+    place-items: center; background: var(--accent-soft); color: var(--accent); }
+  .storebtn .txt { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+  .storebtn small { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--faint); }
+  .storebtn b { font-size: 13.5px; }
+  .storebtn .swap { flex: none; display: inline-flex; align-items: center; gap: 6px; margin-left: 4px;
+    padding: 5px 9px; border-radius: 8px; font-size: 12.5px; font-weight: 600;
+    background: var(--card2); border: 1px solid var(--line); color: var(--muted); }
+  .storebtn:not(:disabled):hover .swap { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+  .storebtn:disabled { opacity: 1; cursor: progress; }
+  .storebtn:disabled .swap { color: var(--accent); }
+  @media (max-width: 560px) { .storebtn .swap span:last-child { display: none; } }
+
+  .themebtn { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; flex: none;
+    background: var(--card); color: var(--muted); border: 1px solid var(--line); }
+  .themebtn:hover { color: var(--accent); border-color: var(--accent); }
+  .themebtn .moon { display: none; }
+  :root[data-theme="dark"] .themebtn .moon { display: block; }
+  :root[data-theme="dark"] .themebtn .sun { display: none; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .themebtn .moon { display: block; }
+    :root:not([data-theme="light"]) .themebtn .sun { display: none; }
+  }
 
   /* Layout */
-  .wrap { max-width: 1500px; margin: 0 auto; padding: clamp(16px, 3vw, 30px); }
+  .wrap { max-width: 1500px; margin: 0 auto; padding: clamp(16px, 2.6vw, 28px); }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(16px, 2vw, 24px);
     align-items: start; }
   @media (max-width: 940px) { .grid { grid-template-columns: 1fr; } }
-
   .card {
-    background: var(--card); border: 1px solid var(--line);
+    background: color-mix(in srgb, var(--card) 92%, transparent); border: 1px solid var(--line);
     border-radius: var(--radius); box-shadow: var(--shadow);
     display: flex; flex-direction: column; overflow: hidden;
-    max-height: calc(100vh - 150px);
+    height: calc(100vh - 128px); min-height: 420px;
   }
-  @media (max-width: 940px) { .card { max-height: none; } }
-  .card-head { padding: 18px 20px 14px; border-bottom: 1px solid var(--line2);
+  @media (max-width: 940px) { .card { height: auto; max-height: none; } }
+  .card-head { padding: 16px 18px 14px; border-bottom: 1px solid var(--line2);
     display: flex; flex-direction: column; gap: 12px; }
-  .card-head .titlerow { display: flex; align-items: center; gap: 10px; min-height: 32px; }
-  .card-head h2 { font-size: 15px; letter-spacing: -.01em; }
-  .card-head h2 .count { color: var(--faint); font-weight: 500; margin-left: 6px; }
+  .card-head .titlerow { display: flex; align-items: center; gap: 10px; min-height: 34px; }
+  .card-head h2 { font-size: 16px; letter-spacing: -.02em; display: flex; align-items: center; gap: 10px;
+    flex: none; }
+  .card-head h2 .count { color: var(--muted); font-weight: 600; font-size: 12px; padding: 1px 8px;
+    border-radius: 999px; background: var(--card2); border: 1px solid var(--line); }
+  .card-head h2 .count:empty { display: none; }
+  .hicon { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; flex: none;
+    color: #fff; background: linear-gradient(135deg, var(--accent), var(--accent2)); }
+  .hicon.alt { background: linear-gradient(135deg, #0ea5e9, #6366f1); }
   .card-body { overflow-y: auto; padding: 6px 10px 12px; flex: 1; min-height: 120px; }
 
+  /* Where the store lives: sits level with the project picker */
+  .locbar { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 6px 0 12px;
+    border-radius: 10px; background: var(--card2); border: 1px solid var(--line); min-width: 0; }
+  .locbar .kind { color: var(--accent); flex: none; display: grid; place-items: center; }
+  .locbar .where { flex: 1; min-width: 0; font-size: 13px; color: var(--ink); }
+  .locbar .iconbtn { width: 30px; height: 30px; }
+  #projectSel { height: 44px; }
   select {
     width: 100%; padding: 10px 12px; border-radius: 10px; font: inherit;
     background: var(--card2); color: var(--ink); border: 1px solid var(--line);
@@ -174,6 +242,7 @@
   .row .side { text-align: right; flex: none; }
   .row .side .t { font-size: 12px; color: var(--muted); }
   .row .side .s { font-size: 11.5px; color: var(--faint); }
+  @media (max-width: 560px) { .row .side { display: none; } .summary { display: none; } }
   .badge { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
     letter-spacing: .03em; text-transform: uppercase; flex: none; white-space: nowrap;
     background: var(--line2); color: var(--muted); }
@@ -220,41 +289,96 @@
     animation: spin .65s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  /* Lock / setup screen */
-  .lockwrap { min-height: 100vh; display: grid; place-items: center; padding: 32px 16px; }
-  .lockcard { width: 100%; max-width: 520px; background: var(--card);
-    border: 1px solid var(--line); border-radius: 22px; box-shadow: var(--shadow);
-    padding: clamp(22px, 5vw, 34px); }
-  .lockbrand { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
-  .lockbrand .logo { width: 40px; height: 40px; border-radius: 12px; }
-  .lockbrand b { font-size: 16px; letter-spacing: -.02em; }
-  .lockbrand span { display: block; font-size: 12px; color: var(--muted); margin-top: -2px; }
-  .lockcard h1 { font-size: 22px; letter-spacing: -.02em; }
-  .lockcard h1 + .note { margin: 6px 0 18px; }
+  /* Start screens: a brand panel beside the store picker / setup form */
+  .lockwrap { min-height: 100vh; display: grid; grid-template-columns: minmax(340px, 46%) 1fr; }
+  .lockwrap > * { min-width: 0; }
+  @media (max-width: 900px) { .lockwrap { grid-template-columns: 1fr; } }
+  .hero {
+    position: relative; overflow: hidden; color: #fff;
+    padding: clamp(28px, 5vw, 56px); display: flex; flex-direction: column; gap: 28px;
+    background:
+      radial-gradient(600px 420px at 85% 10%, rgba(236,72,153,.45), transparent 60%),
+      radial-gradient(520px 520px at 0% 100%, rgba(14,165,233,.40), transparent 62%),
+      linear-gradient(150deg, #1b1046 0%, #3a1fa8 45%, #5b2bd6 100%);
+  }
+  .hero::before { /* faint grid */
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background-image: linear-gradient(rgba(255,255,255,.06) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(255,255,255,.06) 1px, transparent 1px);
+    background-size: 36px 36px;
+    mask-image: radial-gradient(ellipse at 30% 40%, #000 30%, transparent 80%);
+  }
+  .hero > * { position: relative; }
+  .hero .brand .logo { width: 44px; height: 44px; border-radius: 13px; background: rgba(255,255,255,.14);
+    border: 1px solid rgba(255,255,255,.28); box-shadow: 0 8px 24px rgba(0,0,0,.25); backdrop-filter: blur(6px); }
+  .hero .wordmark { font-size: 26px; }
+  .hero h1 { font-size: clamp(28px, 3.4vw, 44px); line-height: 1.08; letter-spacing: -.035em; font-weight: 800;
+    max-width: 14ch; margin-top: auto; }
+  .hero h1 em { font-style: normal; background: linear-gradient(90deg, #f9a8d4, #c4b5fd 50%, #7dd3fc);
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .hero p.lead { color: rgba(255,255,255,.82); font-size: 15.5px; max-width: 44ch; }
+  .feats { list-style: none; padding: 0; display: grid; gap: 12px; margin-bottom: auto; }
+  .feats li { display: flex; gap: 12px; align-items: flex-start; font-size: 14px; color: rgba(255,255,255,.9); }
+  .feats li b { display: block; color: #fff; }
+  .feats li span.i { width: 32px; height: 32px; border-radius: 9px; flex: none; display: grid; place-items: center;
+    background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.2); }
+  .feats li small { color: rgba(255,255,255,.7); font-size: 13px; }
+  .syncart { width: 100%; max-width: 440px; height: auto; }
+  .syncart .flow { stroke-dasharray: 3 7; animation: flow 1.4s linear infinite; }
+  .syncart .flow.rev { animation-direction: reverse; }
+  @keyframes flow { to { stroke-dashoffset: -20; } }
+  @media (prefers-reduced-motion: reduce) { .syncart .flow { animation: none; } }
+  @media (max-width: 900px) {
+    .hero { gap: 16px; padding-bottom: 28px; }
+    .hero h1 { margin-top: 8px; font-size: 28px; max-width: none; }
+    .feats, .syncart { display: none; }
+  }
+
+  .lockpane { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; padding: 72px clamp(16px, 5vw, 56px) 40px; }
+  .lockpane .themebtn { position: absolute; top: 18px; right: 18px; }
+  .lockcard { width: 100%; max-width: 500px; }
+  .lockcard h2.big { font-size: 30px; letter-spacing: -.035em; line-height: 1.15; }
+  .lockcard h2.big + .note { margin: 8px 0 22px; font-size: 14px; }
   .lockcard .note b { color: var(--ink); }
-  .btn.block { width: 100%; padding: 11px 16px; margin-top: 18px; }
-  .backlink { margin-bottom: 14px; display: inline-flex; align-items: center; gap: 4px; }
+  .btn.block { width: 100%; padding: 12px 16px; margin-top: 18px; font-size: 15px; }
+  .backlink { margin-bottom: 18px; display: inline-flex; align-items: center; gap: 4px; }
 
   /* Choice cards: store picker and store kinds */
-  .picks { display: flex; flex-direction: column; gap: 8px; max-height: 40vh; overflow-y: auto; }
+  .picks { display: flex; flex-direction: column; gap: 8px; max-height: 42vh; overflow-y: auto; padding: 3px; margin: -3px; }
   .kinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
   @media (max-width: 520px) { .kinds { grid-template-columns: 1fr; } }
-  .pick { display: flex; align-items: center; gap: 12px; margin: 0; padding: 12px 14px;
-    border: 1px solid var(--line); border-radius: 14px; background: var(--card2);
-    color: var(--ink); cursor: pointer; transition: border-color .12s, background .12s, box-shadow .12s; }
-  .pick:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
+  .pick { position: relative; display: flex; align-items: center; gap: 12px; margin: 0; padding: 12px 14px;
+    border: 1px solid var(--line); border-radius: 14px; background: var(--card);
+    color: var(--ink); cursor: pointer; transition: border-color .12s, background .12s, box-shadow .12s, transform .12s; }
+  .pick:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); transform: translateY(-1px); }
   .pick:has(input:checked) { border-color: var(--accent); background: var(--accent-soft);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
   .pick:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .pick:has(input:disabled) { opacity: .5; cursor: not-allowed; }
+  .pick:has(input:disabled) { opacity: .5; cursor: not-allowed; transform: none; }
   .pick input { position: absolute; opacity: 0; pointer-events: none; }
-  .pick .kicon { width: 36px; height: 36px; border-radius: 10px; flex: none; display: grid;
-    place-items: center; background: var(--card); border: 1px solid var(--line); color: var(--accent); }
+  .pick .kicon { width: 38px; height: 38px; border-radius: 11px; flex: none; display: grid;
+    place-items: center; background: var(--card2); border: 1px solid var(--line); color: var(--accent); }
+  .pick:has(input:checked) .kicon { background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #fff; border-color: transparent; }
   .pick .ptxt { min-width: 0; flex: 1; display: flex; flex-direction: column; }
-  .pick .ptxt b { font-size: 14px; }
+  .pick .ptxt b { font-size: 14.5px; }
   .pick .ptxt small { font-size: 12px; color: var(--muted); }
+  .pick .tick { width: 20px; height: 20px; border-radius: 50%; flex: none; border: 2px solid var(--line);
+    display: grid; place-items: center; }
+  .pick:has(input:checked) .tick { border-color: var(--accent); background: var(--accent); }
+  .pick:has(input:checked) .tick::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #fff; }
   .kinds .pick { flex-direction: column; align-items: flex-start; gap: 10px; }
   .kinds .pick .ptxt small { line-height: 1.35; }
+  /* "Add a store": a tile at the end of the store list */
+  .addtile { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border-radius: 14px;
+    background: transparent; color: var(--muted); border: 1.5px dashed color-mix(in srgb, var(--faint) 55%, transparent); text-align: left;
+    transition: border-color .12s, color .12s, background .12s; }
+  .addtile:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+  .addtile .kicon { width: 38px; height: 38px; border-radius: 11px; flex: none; display: grid; place-items: center;
+    background: var(--card2); border: 1px solid var(--line); }
+  .addtile b { display: block; font-size: 14.5px; color: var(--ink); }
+  .addtile:hover b { color: var(--accent); }
+  .addtile small { font-size: 12px; }
   .kindbox { margin-top: 4px; }
   .kindbox .note { margin-top: 12px; }
   .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
@@ -268,7 +392,7 @@
   .alert { margin-top: 14px; padding: 10px 12px; border-radius: 10px; font-size: 13px;
     color: var(--err); background: color-mix(in srgb, var(--err) 10%, transparent);
     border: 1px solid color-mix(in srgb, var(--err) 28%, transparent); }
-  .lock-links { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+  .lock-links { display: flex; justify-content: center; margin-top: 14px; }
   .linkbtn.subtle { color: var(--muted); }
 
   /* Dialogs — centered, the * { margin:0 } reset is overridden here */
@@ -316,21 +440,54 @@
 
 <!-- ===== Lock / setup ===== -->
 <div id="lock" class="lockwrap hidden">
-  <div class="lockcard">
-    <div class="lockbrand">
+  <aside class="hero">
+    <div class="brand">
       <div class="logo">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M4 12a8 8 0 0 1 13.7-5.6L20 8"/><path d="M20 4v4h-4"/>
           <path d="M20 12a8 8 0 0 1-13.7 5.6L4 16"/><path d="M4 20v-4h4"/>
         </svg>
       </div>
-      <div><b>ccsync</b><span>Claude Code sessions, end-to-end encrypted</span></div>
+      <span class="wordmark">ccsync</span>
     </div>
+    <h1>Your Claude Code sessions, <em>on every machine.</em></h1>
+    <p class="lead">Pick up a conversation where you left it — on your laptop, your desktop or at work.</p>
+    <svg class="syncart" viewBox="0 0 440 120" fill="none" aria-hidden="true">
+      <g stroke="rgba(255,255,255,.85)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="16" y="30" width="92" height="58" rx="8" fill="rgba(255,255,255,.08)"/>
+        <path d="M6 96h112"/><path d="M34 48h40M34 60h56M34 72h30" stroke="rgba(255,255,255,.5)"/>
+        <rect x="332" y="30" width="92" height="58" rx="8" fill="rgba(255,255,255,.08)"/>
+        <path d="M322 96h112"/><path d="M350 48h40M350 60h56M350 72h30" stroke="rgba(255,255,255,.5)"/>
+        <circle cx="220" cy="60" r="34" fill="rgba(255,255,255,.12)"/>
+        <rect x="206" y="58" width="28" height="22" rx="4" fill="rgba(255,255,255,.9)" stroke="none"/>
+        <path d="M211 58v-6a9 9 0 0 1 18 0v6"/>
+      </g>
+      <path class="flow" d="M120 52H182" stroke="#f9a8d4" stroke-width="2.5" stroke-linecap="round"/>
+      <path class="flow rev" d="M120 68H182" stroke="#7dd3fc" stroke-width="2.5" stroke-linecap="round"/>
+      <path class="flow" d="M258 52H320" stroke="#f9a8d4" stroke-width="2.5" stroke-linecap="round"/>
+      <path class="flow rev" d="M258 68H320" stroke="#7dd3fc" stroke-width="2.5" stroke-linecap="round"/>
+    </svg>
+    <ul class="feats">
+      <li><span class="i"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span>
+        <div><b>End-to-end encrypted</b><small>Sessions are sealed with your passphrase before they leave this machine.</small></div></li>
+      <li><span class="i"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span>
+        <div><b>Storage you own</b><small>A private git repo or a folder your sync service already shares.</small></div></li>
+      <li><span class="i"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="m9 12 2 2 4-4"/></svg></span>
+        <div><b>Never loses a message</b><small>An older copy can’t overwrite a newer one; conflicts are shown, not merged away.</small></div></li>
+    </ul>
+  </aside>
 
+  <main class="lockpane">
+    <button class="themebtn" onclick="toggleTheme()" aria-label="Switch light or dark theme" title="Light / dark"><svg class="sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><svg class="moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+  <div class="lockcard">
     <div id="unlockBox" class="hidden">
-      <h1>Welcome back</h1>
-      <p class="note">Pick a store and enter its passphrase.</p>
+      <h2 class="big">Welcome back</h2>
+      <p class="note">Choose a store and unlock it with its passphrase.</p>
       <div id="storePick" class="picks" role="radiogroup" aria-label="Store"></div>
+      <button class="addtile" style="margin-top:8px" onclick="showSetup(true)">
+        <span class="kicon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
+        <span><b>Add a store</b><small>Another repo or synced folder, or one another machine made</small></span>
+      </button>
       <label for="unlockPass">Passphrase</label>
       <div class="pw">
         <input id="unlockPass" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doUnlock()">
@@ -341,14 +498,13 @@
         <span id="unlockSpin" class="spin hidden"></span><span id="unlockLbl">Unlock</span>
       </button>
       <div class="lock-links">
-        <button class="linkbtn" onclick="showSetup(true)">+ Add a store</button>
         <button class="linkbtn subtle" onclick="forgetStore()">Forgot the passphrase?</button>
       </div>
     </div>
 
     <div id="setupBox" class="hidden">
       <button class="linkbtn backlink hidden" id="setupBack" onclick="showUnlock()">← Back to my stores</button>
-      <h1>Set up a store</h1>
+      <h2 class="big">Set up a store</h2>
       <p class="note">Sessions are encrypted with your passphrase before they leave this machine. Set up
         every machine with the <b>same store and passphrase</b> to share them.</p>
       <div class="kinds" role="radiogroup" aria-label="Where to keep the store">
@@ -404,6 +560,7 @@
       </button>
     </div>
   </div>
+  </main>
 </div>
 
 <!-- ===== Main ===== -->
@@ -411,17 +568,21 @@
   <div class="appbar">
     <div class="brand">
       <div class="logo">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
           <path d="M4 12a8 8 0 0 1 13.7-5.6L20 8"/><path d="M20 4v4h-4"/>
           <path d="M20 12a8 8 0 0 1-13.7 5.6L4 16"/><path d="M4 20v-4h4"/>
         </svg>
       </div>
-      <div><b>ccsync</b><span>Claude Code sessions</span></div>
+      <span class="wordmark">ccsync</span>
+      <span class="tagline">Claude Code sessions,<br>synced &amp; encrypted</span>
     </div>
     <div class="spacer"></div>
-    <div class="chip" id="storeChip"><span class="dot"></span><b id="storeName2"></b>
-      <span class="repo mono" id="storeRepo"></span></div>
-    <button class="btn ghost sm" onclick="switchStore()">Switch store</button>
+    <button class="storebtn" id="switchBtn" onclick="switchStore()" title="Switch to another store">
+      <span class="kicon" id="storeKind" aria-hidden="true"></span>
+      <span class="txt"><small>Store</small><b class="ell" id="storeName2"></b></span>
+      <span class="swap"><span id="switchIcon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4 3 8l4 4"/><path d="M3 8h14"/><path d="m17 20 4-4-4-4"/><path d="M21 16H7"/></svg></span><span id="switchLbl">Switch</span></span>
+    </button>
+    <button class="themebtn" onclick="toggleTheme()" aria-label="Switch light or dark theme" title="Light / dark"><svg class="sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><svg class="moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
   </div>
 
   <div class="wrap">
@@ -430,10 +591,10 @@
       <div class="card">
         <div class="card-head">
           <div class="titlerow">
-            <h2>This machine <span class="count" id="localCount"></span></h2>
+            <h2><span class="hicon" aria-hidden="true"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/></svg></span>This machine <span class="count" id="localCount"></span></h2>
             <span class="summary" id="localSummary"></span>
           </div>
-          <select id="projectSel" onchange="loadLocal()"></select>
+          <select id="projectSel" onchange="loadLocal()" aria-label="Project"></select>
           <div class="search">
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
             <input id="localSearch" type="text" placeholder="Search sessions…" oninput="renderLocal()">
@@ -453,11 +614,17 @@
       <div class="card">
         <div class="card-head">
           <div class="titlerow">
-            <h2>In the store <span class="count" id="storeCount"></span></h2>
+            <h2><span class="hicon alt" aria-hidden="true"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 1 0-1.4-8.8A6 6 0 0 0 4.5 12 3.5 3.5 0 0 0 6 19z"/></svg></span>In the store <span class="count" id="storeCount"></span></h2>
             <span class="summary" id="storeSummary"></span>
             <button class="btn ghost sm" id="refreshBtn" onclick="loadStore()">
               <span id="refreshSpin" class="spin hidden"></span><span id="refreshLbl">Refresh</span>
             </button>
+          </div>
+          <div class="locbar">
+            <span class="kind" id="storeKind2" aria-hidden="true"></span>
+            <span class="where mono ell" id="storeRepo"></span>
+            <button class="iconbtn" onclick="copyLocation()" title="Copy" aria-label="Copy the store location"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button>
+            <button class="iconbtn" id="openStoreBtn" onclick="openStore()" title="Open" aria-label="Open the store"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg></button>
           </div>
           <div class="search">
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
@@ -565,8 +732,8 @@ async function obtainToken() {
 }
 let state = null, pullTarget = null, localRows = [], storeMetas = [], projectsBySlug = {};
 
-async function api(path, body) {
-  const opts = { headers: { 'X-CCSync-Token': token } };
+async function api(path, body, signal) {
+  const opts = { headers: { 'X-CCSync-Token': token }, signal };
   if (body !== undefined) {
     opts.method = 'POST';
     opts.headers['Content-Type'] = 'application/json';
@@ -650,6 +817,14 @@ function loadingHTML(text) {
   return `<div class="loading"><span class="spin"></span>${esc(text)}</div>`;
 }
 
+function toggleTheme() {
+  const root = document.documentElement;
+  const dark = root.dataset.theme ? root.dataset.theme === 'dark'
+    : matchMedia('(prefers-color-scheme: dark)').matches;
+  root.dataset.theme = dark ? 'light' : 'dark';
+  try { localStorage.setItem('ccsync-theme', root.dataset.theme); } catch {}
+}
+
 function togglePw(btn) {
   const inp = btn.previousElementSibling, shown = inp.type === 'text';
   inp.type = shown ? 'password' : 'text';
@@ -724,6 +899,7 @@ function showUnlock() {
       <input type="radio" name="store" value="${esc(st.name)}"${st.name === current ? ' checked' : ''}>
       <span class="kicon" aria-hidden="true">${KIND_ICON[st.kind] || KIND_ICON.git}</span>
       <span class="ptxt"><b class="ell">${esc(st.name)}</b><small class="ell mono">${esc(st.location)}</small></span>
+      <span class="tick" aria-hidden="true"></span>
     </label>`).join('');
   box.querySelectorAll('input').forEach(r => r.addEventListener('change', () => {
     lockError('unlockErr', '');
@@ -805,10 +981,35 @@ async function forgetStore() {
 }
 
 async function switchStore() {
+  // Waits for the operation in progress; a status check is abandoned.
+  const btn = document.getElementById('switchBtn'), icon = document.getElementById('switchIcon');
+  const idle = icon.innerHTML;
+  btn.disabled = true;
+  icon.innerHTML = '<span class="spin"></span>';
+  document.getElementById('switchLbl').textContent = 'Switching…';
+  if (statusCtl) statusCtl.abort();
   try {
     await api('/api/lock', {});
     await boot();
   } catch (e) { toast(e.message, true); }
+  btn.disabled = false;
+  icon.innerHTML = idle;
+  document.getElementById('switchLbl').textContent = 'Switch';
+}
+
+async function copyLocation() {
+  const text = state.store.location;
+  try { await navigator.clipboard.writeText(text); }
+  catch { // some embedded web views have no async clipboard
+    const t = Object.assign(document.createElement('textarea'), { value: text });
+    document.body.append(t); t.select(); document.execCommand('copy'); t.remove();
+  }
+  toast('Copied');
+}
+
+async function openStore() {
+  try { await api('/api/open', {}); }
+  catch (e) { toast(e.message, true); }
 }
 
 function openMain() {
@@ -816,8 +1017,15 @@ function openMain() {
   storeMetas = []; storeIds = new Set(); storeLoaded = false; syncStatus = null; statusOk = false;
   document.getElementById('main').classList.remove('hidden');
   document.getElementById('storeName2').textContent = state.store.name;
-  document.getElementById('storeRepo').textContent = state.store.location;
-  document.getElementById('storeChip').title = `Open store: ${state.store.name} — ${state.store.location}`;
+  const repo = document.getElementById('storeRepo');
+  repo.textContent = state.store.location;
+  repo.title = state.store.location;
+  const icon = KIND_ICON[state.store.kind] || KIND_ICON.git;
+  document.getElementById('storeKind').innerHTML = icon;
+  document.getElementById('storeKind2').innerHTML = icon;
+  const open = document.getElementById('openStoreBtn');
+  open.classList.toggle('hidden', !state.store.link);
+  open.title = state.store.kind === 'folder' ? 'Open the folder' : 'Open in the browser';
   document.getElementById('localList').innerHTML = loadingHTML('Loading sessions…');
   document.getElementById('storeList').innerHTML = loadingHTML('Loading the store…');
   loadProjects().then(loadLocal);
@@ -848,6 +1056,7 @@ let storeLoaded = false;  // storeMetas holds the store's listing
 let storeIds = new Set();
 let syncStatus = null;    // {id: relation} seen from this machine; null while checking
 let statusSeq = 0;
+let statusCtl = null;     // aborts the running status check
 
 // What a relation means on each side. Keys are app/session relations of
 // this machine's copy to the store copy.
@@ -898,12 +1107,14 @@ async function loadStatus() {
   const seq = ++statusSeq;
   syncStatus = null; statusOk = false;
   renderLocal(); renderStore();
+  if (statusCtl) statusCtl.abort(); // a newer check supersedes it
+  const ctl = statusCtl = new AbortController();
   try {
-    const st = await api('/api/status');
+    const st = await api('/api/status', undefined, ctl.signal);
     if (seq !== statusSeq) return;
     syncStatus = st; statusOk = true;
   } catch (e) {
-    if (seq !== statusSeq) return;
+    if (seq !== statusSeq || ctl.signal.aborted) return;
     syncStatus = {};
     toast('Couldn’t compare with the store: ' + e.message, true);
   }
@@ -927,7 +1138,7 @@ async function loadLocal() {
     // Drop selections that no longer exist in this project.
     const ids = new Set(localRows.map(s => s.ID));
     [...selected].forEach(id => { if (!ids.has(id)) selected.delete(id); });
-    document.getElementById('localCount').textContent = localRows.length ? `· ${localRows.length}` : '';
+    document.getElementById('localCount').textContent = localRows.length ? String(localRows.length) : '';
     renderLocal();
   } catch (e) {
     if (seq !== localSeq) return;
@@ -1068,7 +1279,7 @@ async function loadStore() {
       .sort((a, b) => new Date(b.session_mtime) - new Date(a.session_mtime));
     storeIds = new Set(storeMetas.map(m => m.session_id));
     storeLoaded = true;
-    document.getElementById('storeCount').textContent = storeMetas.length ? `· ${storeMetas.length}` : '';
+    document.getElementById('storeCount').textContent = storeMetas.length ? String(storeMetas.length) : '';
     loadStatus(); // renders both lists, then again with the badges
   } catch (e) {
     if (storeMetas.length) toast(e.message, true);

@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -433,7 +435,7 @@ func TestStatus(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, err := c.Status([]session.Session{s})
+		got, err := c.Status(context.Background(), []session.Session{s})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -465,4 +467,10 @@ func TestStatus(t *testing.T) {
 
 	rewrite(`{"type":"user","uuid":"u1"}`, `{"type":"user","uuid":"u4"}`)
 	status(session.Diverged, true)
+	// A cancelled request (the GUI switching store) stops early.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := c.Status(ctx, []session.Session{s}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled status: err = %v", err)
+	}
 }

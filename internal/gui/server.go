@@ -49,6 +49,7 @@ type Server struct {
 	// progress is the running operation's, readable while op is held.
 	progMu   sync.Mutex
 	progress app.Progress
+	link     string // the unlocked store's storeLink, readable while op is held
 }
 
 // NewServer returns a server with a fresh token. git never prompts for
@@ -89,6 +90,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/session", s.handleSession)
 	// Progress is polled while another request runs, so it isn't serialized.
 	mux.HandleFunc("GET /api/progress", s.checkToken(s.handleProgress))
+	mux.HandleFunc("POST /api/open", s.checkToken(s.handleOpen))
 	api := func(pattern string, h http.HandlerFunc) {
 		mux.HandleFunc(pattern, s.checkToken(s.serialize(h)))
 	}
@@ -182,6 +184,12 @@ func (s *Server) setClient(c *app.Client) {
 		}
 	}
 	s.client = c
+	s.progMu.Lock()
+	s.link = ""
+	if c != nil {
+		s.link = storeLink(c.Entry)
+	}
+	s.progMu.Unlock()
 }
 
 // Listen binds the GUI server to 127.0.0.1:port (0 picks a free port) and

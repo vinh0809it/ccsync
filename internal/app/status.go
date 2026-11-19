@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"os"
 	"time"
 
@@ -20,8 +21,9 @@ type cachedRelation struct {
 // copy, as Push would: Same, Ahead (push it), Behind (pull it), Diverged
 // or Unknown. Sessions only on one side are left out. It reads the store
 // as last synced (call List first) and remembers results until either copy
-// changes, so asking again is cheap.
-func (c *Client) Status(locals []session.Session) (map[string]session.Relation, error) {
+// changes, so asking again is cheap. Cancelling ctx stops it early with
+// ctx's error; what was compared so far stays cached.
+func (c *Client) Status(ctx context.Context, locals []session.Session) (map[string]session.Relation, error) {
 	out := map[string]session.Relation{}
 	err := c.locked(func() error {
 		metas, _, err := c.store.List(c.key)
@@ -36,6 +38,9 @@ func (c *Client) Status(locals []session.Session) (map[string]session.Relation, 
 			c.status = map[string]cachedRelation{}
 		}
 		for i, s := range locals {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			c.progress("Comparing", i, len(locals))
 			meta, found := byID[s.ID]
 			if !found {

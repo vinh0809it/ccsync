@@ -49,10 +49,14 @@
 - The GUI could run two git operations on the store at once.
 
 ### Changed
-- Redesigned GUI start screens: stores to unlock and store kinds are
-  picked from cards, errors show next to the form, and passphrases can be
-  revealed. Loading states while a project or the store loads; long store
-  names no longer break the header.
+- Redesigned GUI: start screens with a brand panel beside the store
+  picker, stores and store kinds picked from cards, errors next to the
+  form, passphrases that can be revealed; a light and a dark theme (the
+  system's by default). The store's location sits in the store list with
+  Copy and Open (its web page or folder). Loading states while a project
+  or the store loads; long store names no longer break the header.
+- Switch store answers at once: it shows that it's working and stops a
+  running sync-status check instead of waiting for it.
 - Unlocking derives the passphrase key once; sessions are encrypted to a
   random store key. Listing 100 sessions no longer takes ~1 minute.
 - Sessions are gzipped before encryption (a real 38 MB project stored as

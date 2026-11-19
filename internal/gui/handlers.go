@@ -22,13 +22,14 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		Name     string `json:"name"`
 		Kind     string `json:"kind"`
 		Location string `json:"location"` // repo URL or folder
+		Link     string `json:"link"`     // web page or folder to open, if any
 	}
 	info := func(e store.Entry) storeInfo {
 		kind := string(e.Kind)
 		if kind == "" {
 			kind = string(store.KindGit)
 		}
-		return storeInfo{e.Name, kind, e.Location()}
+		return storeInfo{e.Name, kind, e.Location(), storeLink(e)}
 	}
 	stores := make([]storeInfo, 0, len(reg.Stores))
 	for _, e := range reg.Stores {
@@ -99,7 +100,21 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 
 // handleLock forgets the unlocked key, e.g. to switch stores.
 func (s *Server) handleLock(w http.ResponseWriter, r *http.Request) {
-	s.client = nil
+	s.setClient(nil)
+	ok(w, nil)
+}
+
+// handleOpen opens the unlocked store's web page or folder. What to open
+// comes from the store's registry entry, never from the request.
+func (s *Server) handleOpen(w http.ResponseWriter, r *http.Request) {
+	s.progMu.Lock()
+	link := s.link
+	s.progMu.Unlock()
+	if link == "" {
+		fail(w, http.StatusBadRequest, errors.New("this store has no page to open"))
+		return
+	}
+	browse(link)
 	ok(w, nil)
 }
 
@@ -206,7 +221,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, err)
 		return
 	}
-	rels, err := s.client.Status(locals)
+	// The page abandons this request when it switches store; stop then.
+	rels, err := s.client.Status(r.Context(), locals)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err)
 		return
