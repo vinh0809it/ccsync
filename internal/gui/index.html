@@ -218,7 +218,8 @@ try { const t = localStorage.getItem('ccsync-theme'); if (t) document.documentEl
     font-size: 13px; cursor: pointer; }
   .linkbtn:hover { text-decoration: underline; }
   .btn.ghost.danger:not(:disabled):hover { border-color: var(--err); color: var(--err); }
-  .btn.danger-solid { background: var(--err); color: #fff; }
+  .btn.danger-solid { background: #d42a2a; color: #fff; box-shadow: 0 4px 14px rgba(212,42,42,.3); }
+  .btn.danger-solid:not(:disabled):hover { box-shadow: 0 7px 20px rgba(212,42,42,.4); }
 
   .search { position: relative; display: flex; align-items: center; }
   .search svg { position: absolute; left: 12px; color: var(--faint); pointer-events: none; }
@@ -422,13 +423,30 @@ try { const t = localStorage.getItem('ccsync-theme'); if (t) document.documentEl
   dialog[open] { display: flex; flex-direction: column; max-height: min(88vh, 780px); }
   .dlg-head { padding: 20px 22px 8px; flex: none; }
   .dlg-head h2 { font-size: 17px; letter-spacing: -.01em; }
+  .dlg-head.ask { display: flex; align-items: center; gap: 12px; padding-top: 22px; }
+  .dlg-icon { width: 40px; height: 40px; border-radius: 12px; flex: none; display: grid; place-items: center;
+    color: var(--err); background: color-mix(in srgb, var(--err) 13%, transparent); }
+  #askBody p + p, #askBody p + .kl, #askBody .kl + p { margin-top: 12px; }
+  #askBody .fine { font-size: 12px; color: var(--faint); }
+  /* What an action keeps and what it loses, side by side */
+  .kl { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 520px) { .kl { grid-template-columns: 1fr; } }
+  .kl > div { border-radius: 12px; padding: 12px 14px; border: 1px solid; }
+  .kl .keep { background: color-mix(in srgb, var(--ok) 8%, transparent); border-color: color-mix(in srgb, var(--ok) 25%, transparent); }
+  .kl .lose { background: color-mix(in srgb, var(--err) 8%, transparent); border-color: color-mix(in srgb, var(--err) 25%, transparent); }
+  .kl h4 { font-size: 12px; letter-spacing: .05em; text-transform: uppercase; margin-bottom: 6px; }
+  .kl .keep h4 { color: var(--ok); } .kl .lose h4 { color: var(--err); }
+  .kl ul { list-style: none; padding: 0; display: grid; gap: 5px; color: var(--ink); font-size: 13px; }
+  .kl li { display: flex; gap: 7px; align-items: baseline; }
+  .kl .keep li::before { content: "✓"; color: var(--ok); font-weight: 700; }
+  .kl .lose li::before { content: "✕"; color: var(--err); font-weight: 700; }
   .dlg-body { padding: 4px 22px; overflow-y: auto; min-height: 0; flex: 1; }
   .dlg-body:focus { outline: none; }
   /* Progress and results sit outside the scrolling body: always in view. */
   .dlg-status { padding: 0 22px; flex: none; }
   .dlg-status:not(:has(> :not(.hidden))) { display: none; }
   .dlg-status .donebox { max-height: 30vh; overflow-y: auto; }
-  .dlg-foot { padding: 16px 22px 20px; display: flex; align-items: center; gap: 10px; flex: none;
+  .dlg-foot { padding: 16px 22px 20px; display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex: none;
     border-top: 1px solid var(--line2); margin-top: 12px; }
   .pushlist { list-style: none; padding: 0; margin: 8px 0; }
   .pushlist li { padding: 9px 12px; border-radius: 10px; background: var(--card2);
@@ -671,20 +689,20 @@ try { const t = localStorage.getItem('ccsync-theme'); if (t) document.documentEl
   <div class="dlg-body"><ul id="pushList" class="pushlist"></ul></div>
   <div class="dlg-status"><div id="pushProg" class="prog hidden" aria-live="polite"><div class="prog-top"><span class="prog-step"></span><span class="prog-count"></span></div><div class="prog-track"><div class="prog-bar"></div></div></div></div>
   <div class="dlg-foot">
+    <button class="btn ghost" id="pushCancel" onclick="pushDlg.close()">Cancel</button>
     <button class="btn" id="pushGo" onclick="confirmPush()" autofocus>
       <span id="pushSpin" class="spin hidden"></span><span id="pushGoLbl">Push</span>
     </button>
-    <button class="btn ghost" id="pushCancel" onclick="pushDlg.close()">Cancel</button>
   </div>
 </dialog>
 
 <!-- ===== Confirm dialog (askConfirm) ===== -->
 <dialog id="askDlg">
-  <div class="dlg-head"><h2 id="askTitle"></h2></div>
+  <div class="dlg-head ask"><span class="dlg-icon hidden" id="askIcon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17h.01"/></svg></span><h2 id="askTitle"></h2></div>
   <div class="dlg-body"><div id="askBody" class="note"></div></div>
   <div class="dlg-foot">
-    <button class="btn" id="askOk"></button>
     <button class="btn ghost" id="askCancel">Cancel</button>
+    <button class="btn" id="askOk"></button>
   </div>
 </dialog>
 
@@ -701,10 +719,10 @@ try { const t = localStorage.getItem('ccsync-theme'); if (t) document.documentEl
   <div class="dlg-status"><div id="pullProg" class="prog hidden" aria-live="polite"><div class="prog-top"><span class="prog-step"></span><span class="prog-count"></span></div><div class="prog-track"><div class="prog-bar"></div></div></div>
     <div id="pullDone" class="donebox hidden"></div></div>
   <div class="dlg-foot">
+    <button class="btn ghost" id="pullClose" onclick="pullDlg.close()">Close</button>
     <button class="btn" id="pullGo" onclick="doPull()">
       <span id="pullSpin" class="spin hidden"></span><span id="pullGoLbl">Pull</span>
     </button>
-    <button class="btn ghost" id="pullClose" onclick="pullDlg.close()">Close</button>
   </div>
 </dialog>
 
@@ -726,10 +744,10 @@ try { const t = localStorage.getItem('ccsync-theme'); if (t) document.documentEl
   <div class="dlg-status"><div id="pmProg" class="prog hidden" aria-live="polite"><div class="prog-top"><span class="prog-step"></span><span class="prog-count"></span></div><div class="prog-track"><div class="prog-bar"></div></div></div>
     <div id="pmDone" class="donebox hidden"></div></div>
   <div class="dlg-foot">
+    <button class="btn ghost" id="pmClose" onclick="pullManyDlg.close(); loadStore()">Close</button>
     <button class="btn" id="pmGo" onclick="doPullMany()" autofocus>
       <span id="pmSpin" class="spin hidden"></span><span id="pmGoLbl">Pull</span>
     </button>
-    <button class="btn ghost" id="pmClose" onclick="pullManyDlg.close(); loadStore()">Close</button>
   </div>
 </dialog>
 
@@ -774,6 +792,7 @@ function askConfirm(title, bodyHtml, okLabel, danger = false) {
   const ok = document.getElementById('askOk');
   ok.textContent = okLabel;
   ok.classList.toggle('danger-solid', danger);
+  document.getElementById('askIcon').classList.toggle('hidden', !danger);
   return new Promise(resolve => {
     const done = v => { dlg.close(); resolve(v); };
     ok.onclick = () => done(true);
@@ -1028,12 +1047,13 @@ async function copyLocation() {
 
 async function compactStore() {
   const yes = await askConfirm('Compact the store’s history?',
-    'Every replaced or deleted version is kept in the store repo’s git history, so the repo only grows. ' +
-    'Compacting rewrites the history as a single commit holding the sessions the store has now:' +
-    '<ul class="pushlist"><li>Sessions in the store and on your machines are <b>not</b> touched.</li>' +
-    '<li>Old versions — kept when you overwrote or deleted a session — are <b>gone for good</b>.</li>' +
-    '<li>Other machines pick up the new history by themselves.</li>' +
-    '<li>The git host may take a while to reclaim the space.</li></ul>',
+    '<p>Every overwrite and delete leaves the old version in the store repo’s git history, so the repo ' +
+    'only grows. Compacting rewrites that history as one commit of what the store holds now.</p>' +
+    '<div class="kl"><div class="keep"><h4>Kept</h4><ul><li>Every session in the store</li>' +
+    '<li>Sessions on your machines</li><li>Other machines — they follow on their own</li></ul></div>' +
+    '<div class="lose"><h4>Gone for good</h4><ul><li>Versions you overwrote</li>' +
+    '<li>Sessions you deleted</li></ul></div></div>' +
+    '<p class="fine">The git host frees the space on its own schedule — sometimes only days later.</p>',
     'Compact history', true);
   if (!yes) return;
   const btn = document.getElementById('compactBtn'), icon = document.getElementById('compactIcon');
