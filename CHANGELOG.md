@@ -65,9 +65,9 @@
 - The GUI API accepts only the intended HTTP method per endpoint.
 
 ### Added
-- Sync status in the GUI: every session shows whether it is synced, newer
-  here, newer in the store, diverged, not pushed yet or not on this
-  machine, with a count per list. Pushes record a fingerprint of the
+- Sync status in the GUI: every session on this machine shows whether it
+  is synced, newer here, newer in the store, diverged or not pushed yet,
+  with a count of the ones to act on. Pushes record a fingerprint of the
   session's entries, so in-sync copies are recognized without decrypting.
 - Progress for push and pull: the GUI shows each step (packing, encrypting,
   syncing, uploading, pulling) with a session count; the CLI keeps a status

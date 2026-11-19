@@ -454,7 +454,6 @@
         <div class="card-head">
           <div class="titlerow">
             <h2>In the store <span class="count" id="storeCount"></span></h2>
-            <span class="summary" id="storeSummary"></span>
             <button class="btn ghost sm" id="refreshBtn" onclick="loadStore()">
               <span id="refreshSpin" class="spin hidden"></span><span id="refreshLbl">Refresh</span>
             </button>
@@ -858,13 +857,6 @@ const LOCAL_REL = {
   diverged: ['err',  'Diverged',       'Continued both here and on another machine — pushing or pulling with overwrite keeps one side'],
   unknown:  ['dim',  'Can’t compare',  'The copies have no comparable entries'],
 };
-const STORE_REL = {
-  same:     LOCAL_REL.same,
-  ahead:    ['warn', 'Older than here', 'This machine has newer messages — push to update the store'],
-  behind:   ['acc',  'Newer than here', 'The store has messages this machine lacks — pull it'],
-  diverged: LOCAL_REL.diverged,
-  unknown:  LOCAL_REL.unknown,
-};
 const badge = ([cls, text, tip]) =>
   `<span class="badge ${cls}" title="${esc(tip || '')}">${esc(text)}</span>`;
 const CHECKING = ['dim', 'Checking…', 'Comparing with the store'];
@@ -880,16 +872,6 @@ function localBadge(id) {
   if (st === 'unpushed') return badge(['acc', 'Not pushed', 'Not in the store yet']);
   return badge(st ? LOCAL_REL[st] : CHECKING);
 }
-function storeState(id) {
-  if (!syncStatus) return '';
-  return syncStatus[id] || 'missing';
-}
-function storeBadge(id) {
-  const st = storeState(id);
-  if (st === 'missing') return badge(['dim', 'Not on this machine', 'Pull it to continue it here']);
-  return badge(st ? STORE_REL[st] : CHECKING);
-}
-
 // summarize renders counts of the states worth acting on.
 function summarize(states, labels) {
   const n = {};
@@ -900,9 +882,6 @@ function renderSummaries() {
   document.getElementById('localSummary').innerHTML = localLoading ? '' : summarize(
     localRows.map(s => localState(s.ID)),
     [['unpushed', 'not pushed'], ['ahead', 'newer here'], ['behind', 'newer in store'], ['diverged', 'diverged']]);
-  document.getElementById('storeSummary').innerHTML = summarize(
-    storeMetas.map(m => storeState(m.session_id)),
-    [['missing', 'not on this machine'], ['behind', 'newer than here'], ['diverged', 'diverged']]);
 }
 
 // loadStatus compares this machine's sessions with the store's (after the
@@ -910,7 +889,7 @@ function renderSummaries() {
 async function loadStatus() {
   const seq = ++statusSeq;
   syncStatus = null;
-  renderLocal(); renderStore();
+  renderLocal();
   try {
     const st = await api('/api/status');
     if (seq !== statusSeq) return;
@@ -920,7 +899,7 @@ async function loadStatus() {
     syncStatus = {};
     toast('Couldn’t compare with the store: ' + e.message, true);
   }
-  renderLocal(); renderStore();
+  renderLocal();
 }
 
 async function loadLocal() {
@@ -1117,7 +1096,7 @@ function renderStore() {
     <div class="row store pickrow${storeSelected.has(m.session_id) ? ' on' : ''}" data-id="${esc(m.session_id)}">
       <div class="box"></div>
       <div class="main">
-        <div class="ttl"><span class="name">${esc(m.title) || '<span class="muted">(untitled)</span>'}</span>${storeBadge(m.session_id)}</div>
+        <div class="ttl"><span class="name">${esc(m.title) || '<span class="muted">(untitled)</span>'}</span></div>
         <div class="sub"><span class="mono">${esc(short(m.session_id))}</span>
           · ${esc(m.project_label || '')} · from ${esc(m.hostname || '?')}</div>
       </div>
