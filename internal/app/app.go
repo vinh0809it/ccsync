@@ -114,6 +114,24 @@ func (c *Client) publish(message func(n int) string, stage func() (int, error)) 
 	}
 }
 
+// Compact drops the store's history, keeping its current sessions (see
+// store.Store.Compact). Retried when another machine pushes meanwhile.
+func (c *Client) Compact() (r store.CompactResult, err error) {
+	err = c.locked(func() error {
+		for attempt := 1; ; attempt++ {
+			if err := c.sync(); err != nil {
+				return err
+			}
+			c.progress("Compacting the store’s history", 0, 0)
+			r, err = c.store.Compact()
+			if err == nil || !errors.Is(err, store.ErrRemoteMoved) || attempt == publishAttempts {
+				return err
+			}
+		}
+	})
+	return r, err
+}
+
 // Remove deletes sessions, given by (possibly abbreviated) ids, from the
 // store. Local copies are untouched; a git store's history keeps old
 // versions.

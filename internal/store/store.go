@@ -51,7 +51,16 @@ var (
 	ErrNothingToCommit = errors.New("nothing new to push")
 	// ErrRemoteMoved means another machine pushed first.
 	ErrRemoteMoved = errors.New("the remote changed during the push")
+	// ErrNoHistory means the store keeps no history to compact.
+	ErrNoHistory = errors.New("a synced-folder store keeps no history — there is nothing to compact")
 )
+
+// CompactResult is what Compact did.
+type CompactResult struct {
+	Commits int   `json:"commits"` // in the history before; 1 means it was already compact
+	Before  int64 `json:"before"`  // bytes the local clone's history took
+	After   int64 `json:"after"`
+}
 
 // Meta is the per-session metadata blob (stored encrypted).
 type Meta struct {
@@ -214,6 +223,12 @@ func (s *Store) Commit(message string) error { return s.t.commit(message) }
 // Push publishes committed changes; ErrRemoteMoved (wrapped) when another
 // machine pushed first, in which case the caller re-syncs and retries.
 func (s *Store) Push() error { return s.t.push() }
+
+// Compact replaces the store's history with a single commit holding its
+// current files, so replaced and deleted versions stop taking space. Old
+// versions can't be recovered afterwards. ErrRemoteMoved (wrapped) when
+// another machine pushed meanwhile; ErrNoHistory for a synced folder.
+func (s *Store) Compact() (CompactResult, error) { return s.t.compact() }
 
 // Forget removes what this machine keeps of the store — for a git store
 // its clone — never the shared copy itself.

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -181,6 +182,82 @@ func (g gitTransport) push() error {
 		return fmt.Errorf("%w: %v", ErrRemoteMoved, err)
 	}
 	return err
+}
+
+// compact pushes a parentless commit of the current tree in place of the
+// remote branch. The push is leased on the commit the clone was synced to,
+// so a push another machine made meanwhile is never overwritten. The
+// clone's old objects are then pruned.
+func (g gitTransport) compact() (CompactResult, error) {
+	var r CompactResult
+	upstream, err := g.git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+	if err != nil {
+		return r, err
+	}
+	branch, ok := strings.CutPrefix(upstream, "origin/")
+	if !ok {
+		return r, fmt.Errorf("store clone tracks %s, not a branch of origin", upstream)
+	}
+	old, err := g.git("rev-parse", "HEAD")
+	if err != nil {
+		return r, err
+	}
+	count, err := g.git("rev-list", "--count", "HEAD")
+	if err != nil {
+		return r, err
+	}
+	if r.Commits, err = strconv.Atoi(count); err != nil {
+		return r, err
+	}
+	if r.Before, err = g.historySize(); err != nil {
+		return r, err
+	}
+	if r.Commits <= 1 {
+		r.After = r.Before
+		return r, nil
+	}
+	fresh, err := g.git("commit-tree", "HEAD^{tree}", "-m", "ccsync: compact history")
+	if err != nil {
+		return r, err
+	}
+	ref := "refs/heads/" + branch
+	_, err = g.git("push", "--quiet", "--force-with-lease="+ref+":"+old, "origin", fresh+":"+ref)
+	if err != nil {
+		if strings.Contains(err.Error(), "stale info") || strings.Contains(err.Error(), "fetch first") ||
+			strings.Contains(err.Error(), "non-fast-forward") {
+			return r, fmt.Errorf("%w: %v", ErrRemoteMoved, err)
+		}
+		return r, err
+	}
+	if _, err := g.git("reset", "--hard", "--quiet", fresh); err != nil {
+		return r, err
+	}
+	// The remote is done; shrinking this clone is a bonus.
+	if _, err := g.git("reflog", "expire", "--expire=now", "--all"); err == nil {
+		_, _ = g.git("gc", "--quiet", "--prune=now")
+	}
+	r.After, err = g.historySize()
+	return r, err
+}
+
+// historySize is how many bytes the clone's git objects take.
+func (g gitTransport) historySize() (int64, error) {
+	out, err := g.git("count-objects", "-v")
+	if err != nil {
+		return 0, err
+	}
+	var kib int64
+	for _, line := range strings.Split(out, "\n") {
+		k, v, _ := strings.Cut(line, ": ")
+		if k == "size" || k == "size-pack" {
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil {
+				return 0, err
+			}
+			kib += n
+		}
+	}
+	return kib << 10, nil
 }
 
 // forget removes the local clone. It refuses a directory that isn't a

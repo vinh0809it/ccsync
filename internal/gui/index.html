@@ -642,6 +642,7 @@ try { const t = localStorage.getItem('ccsync-theme'); if (t) document.documentEl
             <span class="kind" id="storeKind2" aria-hidden="true"></span>
             <span class="where mono ell" id="storeRepo"></span>
             <button class="iconbtn" onclick="copyLocation()" title="Copy" aria-label="Copy the store location"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button>
+            <button class="iconbtn" id="compactBtn" onclick="compactStore()" title="Compact history — free the space old versions take" aria-label="Compact the store’s history"><span id="compactIcon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg></span></button>
             <button class="iconbtn" id="openStoreBtn" onclick="openStore()" title="Open" aria-label="Open the store"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg></button>
           </div>
           <div class="search">
@@ -1025,6 +1026,29 @@ async function copyLocation() {
   toast('Copied');
 }
 
+async function compactStore() {
+  const yes = await askConfirm('Compact the store’s history?',
+    'Every replaced or deleted version is kept in the store repo’s git history, so the repo only grows. ' +
+    'Compacting rewrites the history as a single commit holding the sessions the store has now:' +
+    '<ul class="pushlist"><li>Sessions in the store and on your machines are <b>not</b> touched.</li>' +
+    '<li>Old versions — kept when you overwrote or deleted a session — are <b>gone for good</b>.</li>' +
+    '<li>Other machines pick up the new history by themselves.</li>' +
+    '<li>The git host may take a while to reclaim the space.</li></ul>',
+    'Compact history', true);
+  if (!yes) return;
+  const btn = document.getElementById('compactBtn'), icon = document.getElementById('compactIcon');
+  const idle = icon.innerHTML;
+  btn.disabled = true;
+  icon.innerHTML = '<span class="spin"></span>';
+  try {
+    const r = await api('/api/compact', {});
+    toast(r.commits <= 1 ? 'The history is already a single commit'
+      : `Compacted ${r.commits} commits into 1 — this machine’s copy went from ${size(r.before)} to ${size(r.after)}`);
+  } catch (e) { toast(e.message, true); }
+  btn.disabled = false;
+  icon.innerHTML = idle;
+}
+
 async function openStore() {
   try { await api('/api/open', {}); }
   catch (e) { toast(e.message, true); }
@@ -1041,6 +1065,7 @@ function openMain() {
   const icon = KIND_ICON[state.store.kind] || KIND_ICON.git;
   document.getElementById('storeKind').innerHTML = icon;
   document.getElementById('storeKind2').innerHTML = icon;
+  document.getElementById('compactBtn').classList.toggle('hidden', !isGitStore());
   const open = document.getElementById('openStoreBtn');
   open.classList.toggle('hidden', !state.store.link);
   open.title = state.store.kind === 'folder' ? 'Open the folder' : 'Open in the browser';

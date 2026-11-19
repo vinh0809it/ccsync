@@ -204,6 +204,13 @@ func TestFullFlow(t *testing.T) {
 	if len(metas) != 0 {
 		t.Fatalf("store after remove = %+v", metas)
 	}
+
+	// Compacting folds the history (setup, pushes, removal) into one commit.
+	var compacted struct{ Commits int }
+	json.Unmarshal(e.call(t, "POST", "/api/compact", map[string]any{}, true), &compacted)
+	if compacted.Commits < 2 || testutil.Git(t, e.remote, "rev-list", "--count", "HEAD") != "1" {
+		t.Fatalf("compact: %+v, remote has %s commits", compacted, testutil.Git(t, e.remote, "rev-list", "--count", "HEAD"))
+	}
 }
 
 func TestUnlockRejectsWrongPassphrase(t *testing.T) {

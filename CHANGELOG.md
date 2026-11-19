@@ -69,6 +69,10 @@
 - The GUI API accepts only the intended HTTP method per endpoint.
 
 ### Added
+- `ccsync compact --yes` (and a button in the GUI) replaces a git store's
+  history with a single commit of its current sessions, freeing the space
+  that replaced and deleted versions take. A push it hasn't seen is never
+  overwritten; other machines follow the new history by themselves.
 - Sync status in the GUI: every session on this machine shows whether it
   is synced, newer here, newer in the store, diverged or not pushed yet,
   with a count of the ones to act on; store sessions not on this machine

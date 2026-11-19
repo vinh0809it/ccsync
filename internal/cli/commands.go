@@ -441,6 +441,36 @@ func (c *cli) rm(args []string) error {
 	return nil
 }
 
+func (c *cli) compact(args []string) error {
+	fs := flag.NewFlagSet("compact", flag.ContinueOnError)
+	yes := fs.Bool("yes", false, "confirm: old versions can't be recovered afterwards")
+	if err := c.parseFlags(fs, args); err != nil {
+		return err
+	}
+	if !*yes {
+		fmt.Fprintln(c.err, "compact replaces the store's git history with one commit of its current")
+		fmt.Fprintln(c.err, "sessions. Replaced and deleted versions are gone for good; other machines")
+		fmt.Fprintln(c.err, "pick up the new history on their next command.")
+		return fmt.Errorf("%w: run again with --yes to go ahead", errUsage)
+	}
+	client, err := c.unlock()
+	if err != nil {
+		return err
+	}
+	r, err := client.Compact()
+	if err != nil {
+		return err
+	}
+	if r.Commits <= 1 {
+		fmt.Fprintln(c.out, "The store's history is already a single commit.")
+		return nil
+	}
+	fmt.Fprintf(c.out, "Compacted %d commits into 1; this clone's history went from %s to %s.\n",
+		r.Commits, humanSize(r.Before), humanSize(r.After))
+	fmt.Fprintln(c.out, "The git host may take a while to reclaim the space of the old history.")
+	return nil
+}
+
 func (c *cli) migrate(args []string) error {
 	fs := flag.NewFlagSet("migrate", flag.ContinueOnError)
 	if err := c.parseFlags(fs, args); err != nil {

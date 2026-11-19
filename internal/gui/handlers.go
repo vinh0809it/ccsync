@@ -104,6 +104,19 @@ func (s *Server) handleLock(w http.ResponseWriter, r *http.Request) {
 	ok(w, nil)
 }
 
+func (s *Server) handleCompact(w http.ResponseWriter, r *http.Request) {
+	if s.client == nil {
+		fail(w, http.StatusForbidden, errLocked)
+		return
+	}
+	res, err := s.client.Compact()
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err)
+		return
+	}
+	ok(w, res)
+}
+
 // handleOpen opens the unlocked store's web page or folder. What to open
 // comes from the store's registry entry, never from the request.
 func (s *Server) handleOpen(w http.ResponseWriter, r *http.Request) {
