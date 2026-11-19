@@ -75,7 +75,11 @@ try { const t = localStorage.getItem('ccsync-theme'); if (t) document.documentEl
   }
   button { font: inherit; cursor: pointer; border: 0; }
   button:disabled { opacity: .5; cursor: default; }
-  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* Focus rings only while the keyboard is in use (html.kbd): some web
+     views ring every programmatically focused button, e.g. a dialog's
+     default button or the one focus returns to after it closes. */
+  :focus { outline: none; }
+  html.kbd :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .hidden { display: none !important; }
   .mono { font-family: ui-monospace, "JetBrains Mono", SFMono-Regular, Menlo, Consolas, monospace; }
   .muted { color: var(--muted); }
@@ -297,7 +301,7 @@ try { const t = localStorage.getItem('ccsync-theme'); if (t) document.documentEl
     background: transparent; color: var(--muted); border: 1px solid transparent; }
   .iconbtn:hover { background: var(--card); border-color: var(--line); color: var(--accent); }
   .iconbtn.danger:hover { color: var(--err); }
-  .iconbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  html.kbd .iconbtn:focus-visible { outline-offset: 1px; }
 
   /* Spinner */
   .spin { width: 15px; height: 15px; border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
@@ -369,7 +373,7 @@ try { const t = localStorage.getItem('ccsync-theme'); if (t) document.documentEl
   .pick:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); transform: translateY(-1px); }
   .pick:has(input:checked) { border-color: var(--accent); background: var(--accent-soft);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
-  .pick:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+  html.kbd .pick:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
   .pick:has(input:disabled) { opacity: .5; cursor: not-allowed; transform: none; }
   .pick input { position: absolute; opacity: 0; pointer-events: none; }
   .pick .kicon { width: 38px; height: 38px; border-radius: 11px; flex: none; display: grid;
@@ -754,6 +758,13 @@ try { const t = localStorage.getItem('ccsync-theme'); if (t) document.documentEl
 <div id="toast"></div>
 
 <script>
+// Keyboard or pointer: decides whether focus rings show (see html.kbd).
+addEventListener('keydown', e => {
+  if (['Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key))
+    document.documentElement.classList.add('kbd');
+}, true);
+addEventListener('pointerdown', () => document.documentElement.classList.remove('kbd'), true);
+
 // The URL carries a one-time code, exchanged here for the API token. The
 // token is kept for this tab only and never appears in a URL.
 let token = sessionStorage.getItem('ccsync-token') || '';
