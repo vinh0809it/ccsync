@@ -164,7 +164,7 @@ func (s *Store) create(passphrase string) error {
 	if err := s.t.commit("ccsync: initialize store"); err != nil {
 		return err
 	}
-	return s.t.push()
+	return s.t.push(nil)
 }
 
 // writeKeyFiles writes the current-format marker, check file and wrapped key.
@@ -222,7 +222,11 @@ func (s *Store) Commit(message string) error { return s.t.commit(message) }
 
 // Push publishes committed changes; ErrRemoteMoved (wrapped) when another
 // machine pushed first, in which case the caller re-syncs and retries.
-func (s *Store) Push() error { return s.t.push() }
+func (s *Store) Push() error { return s.t.push(nil) }
+
+// PushProgress is Push, telling progress how many files are uploaded of
+// how many (git's object count) as it goes.
+func (s *Store) PushProgress(progress func(done, total int)) error { return s.t.push(progress) }
 
 // Compact replaces the store's history with a single commit holding its
 // current files, so replaced and deleted versions stop taking space. Old

@@ -258,25 +258,6 @@ func appendLine(t *testing.T, file, line string) {
 	testutil.WriteFile(t, file, string(data)+line+"\n")
 }
 
-func TestBatches(t *testing.T) {
-	s := func(size int64) session.Session { return session.Session{Size: size} }
-	got := batches([]session.Session{s(40), s(30), s(100), s(10), s(10)}, 64)
-	var sizes [][]int64
-	for _, b := range got {
-		var row []int64
-		for _, x := range b {
-			row = append(row, x.Size)
-		}
-		sizes = append(sizes, row)
-	}
-	want := "[[40] [30] [100] [10 10]]"
-	if fmt.Sprint(sizes) != want {
-		t.Fatalf("batches = %v, want %s", sizes, want)
-	}
-}
-
-// TestPushOverUnreadableStoreCopy: an unreadable store copy is reported,
-// not fatal to the batch, and replaced when overwriting.
 func TestPushOverUnreadableStoreCopy(t *testing.T) {
 	m, c := machine(t, testutil.Remote(t))
 	bad := localSession(t, m, "cdcdcdcd-aaaa-bbbb-cccc-000000000001", `{"type":"user","uuid":"u1"}`)
@@ -411,11 +392,23 @@ func TestPushReportsProgress(t *testing.T) {
 	seen := map[string]bool{}
 	for _, p := range steps {
 		seen[p.Step] = true
-		if p.Total != 0 && (p.Total != 2 || p.Done < 0 || p.Done >= p.Total) {
+		switch {
+		case p.Step == "Encrypting" && (p.Total != 2 || p.Done < 0 || p.Done >= p.Total),
+			p.Step == "Uploading" && (p.Done < 0 || p.Done > p.Total):
 			t.Errorf("bad count: %+v", p)
 		}
 	}
-	for _, step := range []string{"Packing", "Syncing with the store", "Encrypting", "Uploading to the store"} {
+	// Two steps after the sync: encrypt everything, then upload it once.
+	order := []string{}
+	for _, p := range steps {
+		if p.Step != "" && (len(order) == 0 || order[len(order)-1] != p.Step) {
+			order = append(order, p.Step)
+		}
+	}
+	if fmt.Sprint(order) != "[Syncing with the store Encrypting Uploading]" {
+		t.Errorf("steps = %v", order)
+	}
+	for _, step := range []string{"Syncing with the store", "Encrypting", "Uploading"} {
 		if !seen[step] {
 			t.Errorf("no %q step in %+v", step, steps)
 		}

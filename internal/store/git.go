@@ -1,10 +1,14 @@
 package store
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -19,6 +23,15 @@ func (g gitTransport) git(args ...string) (string, error) {
 }
 
 func (g gitTransport) gitIn(dir string, args ...string) (string, error) {
+	out, err := g.command(dir, args...).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// command prepares git to run in dir with the store's settings.
+func (g gitTransport) command(dir string, args ...string) *exec.Cmd {
 	full := append([]string{"-C", dir,
 		"-c", "user.name=ccsync", "-c", "user.email=ccsync@localhost",
 		// A global signing setup would prompt or fail on store commits.
@@ -33,11 +46,7 @@ func (g gitTransport) gitIn(dir string, args ...string) (string, error) {
 	if !g.s.Interactive {
 		cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0")
 	}
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(out)))
-	}
-	return strings.TrimSpace(string(out)), nil
+	return cmd
 }
 
 // open clones repoURL (or adopts an existing clone of it) and brings it up
@@ -175,13 +184,63 @@ func containsPath(list, p string) bool {
 
 // push publishes the current branch with an explicit refspec (independent
 // of the user's push.default) and sets its upstream.
-func (g gitTransport) push() error {
-	_, err := g.git("push", "--quiet", "-u", "origin", "HEAD")
+func (g gitTransport) push(progress func(done, total int)) error {
+	var err error
+	if progress == nil {
+		_, err = g.git("push", "--quiet", "-u", "origin", "HEAD")
+	} else {
+		err = g.gitProgress(progress, "push", "--progress", "-u", "origin", "HEAD")
+	}
 	if err != nil && (strings.Contains(err.Error(), "fetch first") ||
 		strings.Contains(err.Error(), "non-fast-forward")) {
 		return fmt.Errorf("%w: %v", ErrRemoteMoved, err)
 	}
 	return err
+}
+
+// writingObjects matches git's upload progress: "Writing objects:  45% (9/20)".
+var writingObjects = regexp.MustCompile(`Writing objects:\s+\d+% \((\d+)/(\d+)\)`)
+
+// gitProgress runs git like git(), reporting its "Writing objects"
+// progress as it streams by.
+func (g gitTransport) gitProgress(progress func(done, total int), args ...string) error {
+	cmd := g.command(g.s.Dir, args...)
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+	cmd.Stdout = io.Discard
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	var out strings.Builder
+	sc := bufio.NewScanner(stderr)
+	sc.Split(scanCRLF) // progress lines end in \r
+	for sc.Scan() {
+		line := sc.Text()
+		if m := writingObjects.FindStringSubmatch(line); m != nil {
+			done, _ := strconv.Atoi(m[1])
+			total, _ := strconv.Atoi(m[2])
+			progress(done, total)
+			continue
+		}
+		out.WriteString(line + "\n")
+	}
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(out.String()))
+	}
+	return nil
+}
+
+// scanCRLF splits at \r or \n.
+func scanCRLF(data []byte, atEOF bool) (int, []byte, error) {
+	if i := bytes.IndexAny(data, "\r\n"); i >= 0 {
+		return i + 1, data[:i], nil
+	}
+	if atEOF && len(data) > 0 {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
 }
 
 // compact pushes a parentless commit of the current tree in place of the

@@ -81,9 +81,10 @@
   with a count of the ones to act on; store sessions not on this machine
   are marked too. Pushes record a fingerprint of the
   session's entries, so in-sync copies are recognized without decrypting.
-- Progress for push and pull: the GUI shows each step (packing, encrypting,
-  syncing, uploading, pulling) with a session count; the CLI keeps a status
-  line on the terminal.
+- Progress for push and pull. A push runs in two steps, each counted:
+  encrypting every session, then uploading them all at once (git's file
+  count); the GUI shows the step and count, the CLI keeps a status line on
+  the terminal.
 - Delete several store sessions at once in the GUI.
 - Pull many sessions at once: `pull --all` / `pull <id>...` and **Pull
   selected** in the GUI, each to its original project path moved by folder
@@ -112,8 +113,9 @@
 - A pulled session keeps its original modification time.
 - Active sessions met during a push are skipped and reported instead of
   aborting the whole push.
-- `ccsync push --all-projects`, and "All projects" in the GUI. Large pushes
-  are split into commits of at most ~64 MB so memory stays bounded.
+- `ccsync push --all-projects`, and "All projects" in the GUI. Sessions are
+  encrypted one at a time, so memory stays bounded however many are
+  pushed; a large push becomes several commits of about 64 MB.
 - Native-window apps for Windows, macOS (.app) and Linux (with an installer),
   built by the release workflow. `ccsync` with no arguments opens the GUI, so
   every download works on double-click.

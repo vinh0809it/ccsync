@@ -104,7 +104,7 @@ func (c *Client) publish(message func(n int) string, stage func() (int, error)) 
 			return err
 		}
 		beforePush()
-		c.progress("Uploading to the store", 0, 0)
+		c.progress("Uploading", 0, 0)
 		err = c.store.Push()
 		// A failed push leaves an unpublished commit that the next Sync
 		// discards, so a later run can never mistake it for published.

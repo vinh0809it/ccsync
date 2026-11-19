@@ -22,7 +22,8 @@ type transport interface {
 	commit(message string) error
 	// push shares committed changes; ErrRemoteMoved (wrapped) when another
 	// machine was first.
-	push() error
+	// progress, if set, is told how many files are uploaded of how many.
+	push(progress func(done, total int)) error
 	// compact drops the shared history (see Store.Compact).
 	compact() (CompactResult, error)
 	// forget removes what this machine keeps of the store — never the
@@ -89,9 +90,9 @@ func (f folderTransport) sync() error {
 	return nil
 }
 
-func (folderTransport) commit(string) error             { return nil } // writes are already in place
-func (folderTransport) compact() (CompactResult, error) { return CompactResult{}, ErrNoHistory }
-func (folderTransport) push() error                     { return nil } // the sync service ships them
+func (folderTransport) commit(string) error              { return nil } // writes are already in place
+func (folderTransport) compact() (CompactResult, error)  { return CompactResult{}, ErrNoHistory }
+func (folderTransport) push(func(done, total int)) error { return nil } // the sync service ships them
 
 // forget leaves the folder alone: it is the shared store itself.
 func (folderTransport) forget() error { return nil }
