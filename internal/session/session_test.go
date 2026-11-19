@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -450,5 +451,37 @@ func TestLoadBigTranscript(t *testing.T) {
 		if err != nil || s.Title != c.want || s.Cwd != "/home/alice/webapp" || s.Version != "2.1.0" {
 			t.Errorf("%s: %+v %v", name, s, err)
 		}
+	}
+}
+
+func TestPreview(t *testing.T) {
+	transcript := strings.Join([]string{
+		`{"type":"user","message":{"role":"user","content":"first question"}}`,
+		`{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"hm"},{"type":"text","text":"first answer"}]}}`,
+		`{"type":"user","isMeta":true,"message":{"content":"meta"}}`,
+		`{"type":"user","message":{"content":"<command-name>/rename</command-name>"}}`,
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]}}`,
+		`{"type":"user","message":{"content":[{"type":"tool_result","content":"out"}]}}`,
+		`{"type":"user","message":{"content":[{"type":"text","text":"second question"}]},"timestamp":"2026-11-19T10:00:00Z"}`,
+		`not json`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"` + strings.Repeat("é", 700) + `"}]}}`,
+	}, "\n")
+	msgs, err := Preview(strings.NewReader(transcript), 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, m := range msgs {
+		r := []rune(m.Text)
+		got = append(got, m.Role+":"+string(r[:min(len(r), 15)]))
+	}
+	if want := "[assistant:first answer user:second question assistant:" + strings.Repeat("é", 15) + "]"; fmt.Sprint(got) != want {
+		t.Fatalf("preview = %v", got)
+	}
+	if r := []rune(msgs[2].Text); len(r) != previewChars+1 {
+		t.Fatalf("long message has %d runes", len(r))
+	}
+	if msgs[1].Time.IsZero() {
+		t.Fatal("timestamp lost")
 	}
 }

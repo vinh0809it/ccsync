@@ -3,10 +3,12 @@
 package app
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 
 	"github.com/vinh0809it/ccsync/internal/crypto"
+	"github.com/vinh0809it/ccsync/internal/session"
 	"github.com/vinh0809it/ccsync/internal/store"
 )
 
@@ -139,6 +141,24 @@ func (c *Client) History() (h store.History, err error) {
 		return err
 	})
 	return h, err
+}
+
+// Preview returns the last n messages of a session's store copy.
+func (c *Client) Preview(id string, n int) (msgs []session.Message, err error) {
+	err = c.locked(func() error {
+		payload, err := c.store.OpenPayload(c.key, id)
+		if err != nil {
+			return err
+		}
+		defer payload.Close()
+		contents, err := session.Unpack(payload)
+		if err != nil {
+			return err
+		}
+		msgs, err = session.Preview(bytes.NewReader(contents.Transcript), n)
+		return err
+	})
+	return msgs, err
 }
 
 // Remove deletes sessions, given by (possibly abbreviated) ids, from the

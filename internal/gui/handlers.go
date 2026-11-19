@@ -136,6 +136,49 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	ok(w, h)
 }
 
+// handlePreview returns a session's last messages, from this machine's
+// copy (from=local) or the store's.
+func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
+	if s.client == nil {
+		fail(w, http.StatusForbidden, errLocked)
+		return
+	}
+	id := r.URL.Query().Get("id")
+	if !session.ValidID(id) {
+		fail(w, http.StatusBadRequest, fmt.Errorf("invalid session id"))
+		return
+	}
+	const n = 6
+	if r.URL.Query().Get("from") != "local" {
+		msgs, err := s.client.Preview(id, n)
+		if err != nil {
+			fail(w, http.StatusInternalServerError, err)
+			return
+		}
+		ok(w, msgs)
+		return
+	}
+	// Only a transcript ccsync lists itself is read: never a path from
+	// the request.
+	locals, err := session.ListAll()
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err)
+		return
+	}
+	for _, l := range locals {
+		if l.ID == id {
+			msgs, err := session.PreviewFile(l.File, n)
+			if err != nil {
+				fail(w, http.StatusInternalServerError, err)
+				return
+			}
+			ok(w, msgs)
+			return
+		}
+	}
+	fail(w, http.StatusNotFound, fmt.Errorf("no session %s on this machine", id))
+}
+
 // handleOpen opens the unlocked store's web page or folder. What to open
 // comes from the store's registry entry, never from the request.
 func (s *Server) handleOpen(w http.ResponseWriter, r *http.Request) {

@@ -74,6 +74,10 @@
 - The GUI API accepts only the intended HTTP method per endpoint.
 
 ### Added
+- Session details in the GUI: an info button on every session shows its
+  id, project, host, dates and resume command, with a preview of its last
+  messages (decrypted for a store copy). Status badges are one word, and
+  hovering a cut-off name shows it in full.
 - `ccsync compact --yes` (and a button in the GUI) replaces a git store's
   history with a single commit of its current sessions, freeing the space
   that replaced and deleted versions take. A push it hasn't seen is never

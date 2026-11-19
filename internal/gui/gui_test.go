@@ -197,6 +197,12 @@ func TestFullFlow(t *testing.T) {
 		t.Fatal("forced pull did not back up the local copy")
 	}
 
+	// Previews come from either copy; a bad id is refused.
+	for _, from := range []string{"store", "local"} {
+		e.call(t, "GET", "/api/preview?from="+from+"&id="+id, nil, true)
+	}
+	e.call(t, "GET", "/api/preview?from=local&id=../../etc", nil, false)
+
 	// Removal takes exact ids only.
 	e.call(t, "POST", "/api/remove", map[string]any{"ids": []string{"66666666"}}, false)
 	e.call(t, "POST", "/api/remove", map[string]any{"ids": []string{id}}, true)
