@@ -274,6 +274,10 @@ try { const t = localStorage.getItem('ccsync-theme'); if (t) document.documentEl
   .summary { font-size: 12px; color: var(--muted); min-width: 0; flex: 1;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .summary b { font-weight: 600; }
+  .filterchip { font: inherit; font-size: 12px; color: var(--muted); padding: 3px 10px; border-radius: 999px;
+    background: var(--card2); border: 1px dashed var(--line); white-space: nowrap; }
+  .filterchip:hover { color: var(--accent); border-color: var(--accent); }
+  .filterchip.on { color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent); }
   .badge.warn { background: var(--warn-soft); color: var(--warn); }
   .rule { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
   .rule input { flex: 1; min-width: 0; }
@@ -1096,7 +1100,7 @@ async function openStore() {
 
 function openMain() {
   selected.clear(); // a switch of store starts clean
-  storeMetas = []; storeIds = new Set(); storeLoaded = false; syncStatus = null; statusOk = false;
+  storeMetas = []; storeIds = new Set(); storeLoaded = false; syncStatus = null; statusOk = false; onlyMissing = false;
   document.getElementById('main').classList.remove('hidden');
   document.getElementById('storeName2').textContent = state.store.name;
   const repo = document.getElementById('storeRepo');
@@ -1194,7 +1198,11 @@ function renderSummaries() {
     localRows.map(s => localState(s.ID)),
     [['unpushed', 'not pushed'], ['ahead', 'newer here'], ['behind', 'newer in store'], ['diverged', 'diverged']]);
   const missing = storeMetas.filter(m => missingHere(m.session_id)).length;
-  document.getElementById('storeSummary').innerHTML = missing ? `<b>${missing}</b> not on this machine` : '';
+  if (statusOk && !missing) onlyMissing = false; // e.g. all deleted
+  document.getElementById('storeSummary').innerHTML = missing || onlyMissing
+    ? `<button class="filterchip${onlyMissing ? ' on' : ''}" onclick="toggleOnlyMissing()" aria-pressed="${onlyMissing}"
+        title="${onlyMissing ? 'Show every session' : 'Show only these, e.g. to delete them from the store'}">
+        <b>${missing}</b> not on this machine${onlyMissing ? ' ✕' : ''}</button>` : '';
 }
 
 // loadStatus compares this machine's sessions with the store's (after the
@@ -1384,10 +1392,20 @@ async function loadStore() {
   busy('refreshBtn', 'refreshSpin', false, 'refreshLbl', 'Refreshing…', 'Refresh');
 }
 
+// onlyMissing filters the store list to sessions this machine doesn't have.
+let onlyMissing = false;
+function toggleOnlyMissing() {
+  onlyMissing = !onlyMissing;
+  // Never act on rows the filter hides: Delete must take only what's shown.
+  if (onlyMissing) [...storeSelected].forEach(id => { if (!missingHere(id)) storeSelected.delete(id); });
+  renderStore();
+}
+
 function storeVisible() {
   const q = document.getElementById('storeSearch').value.trim().toLowerCase();
-  if (!q) return storeMetas;
-  return storeMetas.filter(m =>
+  const metas = onlyMissing ? storeMetas.filter(m => missingHere(m.session_id)) : storeMetas;
+  if (!q) return metas;
+  return metas.filter(m =>
     (m.title || '').toLowerCase().includes(q) ||
     (m.project_label || '').toLowerCase().includes(q) ||
     (m.hostname || '').toLowerCase().includes(q) ||

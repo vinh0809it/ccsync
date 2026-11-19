@@ -88,7 +88,8 @@
   encrypting every session, then uploading them (git's file count), at
   most 5 commits per git push; the GUI shows the step and count, the CLI keeps a status line on
   the terminal.
-- Delete several store sessions at once in the GUI.
+- Delete several store sessions at once in the GUI; the "not on this machine" count
+  filters the store list to those, e.g. to delete sessions removed here.
 - Pull many sessions at once: `pull --all` / `pull <id>...` and **Pull
   selected** in the GUI, each to its original project path moved by folder
   mappings (`--map FROM=TO`; the GUI proposes one when the home directory
