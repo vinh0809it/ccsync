@@ -49,6 +49,8 @@
 - The GUI could run two git operations on the store at once.
 
 ### Changed
+- Pushing a session the store already has in sync no longer packs or
+  encrypts it (the fingerprint recorded at push tells).
 - Listing local sessions reads a big transcript only at both ends (its
   first lines and the last megabyte) instead of all of it: 45 real
   sessions (1.1 GB) list in 0.18 s instead of 0.8 s.
@@ -76,8 +78,7 @@
   history with a single commit of its current sessions, freeing the space
   that replaced and deleted versions take. A push it hasn't seen is never
   overwritten; other machines follow the new history by themselves. The
-  GUI shows the history's size next to it, amber from 500 MB and red from
-  1 GB.
+  GUI's confirmation shows the history's current size.
 - Sync status in the GUI: every session on this machine shows whether it
   is synced, newer here, newer in the store, diverged or not pushed yet,
   with a count of the ones to act on; store sessions not on this machine

@@ -136,6 +136,14 @@ func (c *Client) stagePush(sessions []session.Session, fallbackCwd string, opts 
 	host, _ := os.Hostname()
 	for i, s := range sessions {
 		c.progress("Encrypting", i, len(sessions))
+		// A session the store already has (same entries, by the
+		// fingerprint pushes record) needs no packing or encrypting.
+		if existing, found, err := c.store.Lookup(c.key, s.ID); err == nil && found && existing.Entries != "" {
+			if transcript, err := os.ReadFile(s.File); err == nil && session.Fingerprint(transcript) == existing.Entries {
+				res.Skipped = append(res.Skipped, s.ID)
+				continue
+			}
+		}
 		it, err := bundle(s, fallbackCwd, host)
 		if err != nil {
 			return res, 0, err
