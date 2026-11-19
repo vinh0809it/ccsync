@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -409,5 +410,78 @@ func TestLongProjectPathAmbiguous(t *testing.T) {
 	}
 	if _, err := projectDir(claudeDir, base+"app-c"); err == nil {
 		t.Fatal("an unknown long path was guessed")
+	}
+}
+func TestFingerprint(t *testing.T) {
+	a := []byte("{\"type\":\"user\",\"uuid\":\"u1\",\"cwd\":\"/a\"}\n{\"type\":\"custom-title\",\"customTitle\":\"x\"}\n")
+	moved := []byte("{\"type\":\"user\",\"uuid\":\"u1\",\"cwd\":\"/b\"}\n{\"type\":\"custom-title\",\"customTitle\":\"x\"}\n")
+	more := append(append([]byte{}, a...), "{\"type\":\"user\",\"uuid\":\"u2\"}\n"...)
+	if Fingerprint(a) == "" || Fingerprint(a) != Fingerprint(moved) {
+		t.Error("copies with the same entries must share a fingerprint")
+	}
+	if Fingerprint(a) == Fingerprint(more) {
+		t.Error("a copy with more entries must have another fingerprint")
+	}
+	if Fingerprint([]byte("{\"type\":\"summary\"}\n")) != "" {
+		t.Error("a transcript without entries has no fingerprint")
+	}
+}
+
+// TestLoadBigTranscript: a big transcript is read at both ends, and still
+// yields the first cwd and version and the latest title.
+func TestLoadBigTranscript(t *testing.T) {
+	filler := `{"type":"assistant","message":"` + strings.Repeat("x", 4000) + `"}` + "\n"
+	title := func(s string) string { return `{"type":"custom-title","customTitle":"` + s + `"}` + "\n" }
+	head := `{"type":"user","cwd":"/home/alice/webapp","version":"2.1.0"}` + "\n"
+	cases := map[string]struct{ body, want string }{
+		"renamed later": {head + title("old") + strings.Repeat(filler, 600) + title("new") + filler, "new"},
+		// The last line alone outgrows the tail window.
+		"giant last line": {head + title("only") + strings.Repeat(filler, 400) +
+			`{"type":"user","message":"` + strings.Repeat("y", 2<<20) + `"}` + "\n", "only"},
+		// No cwd near the start: found further in.
+		"late cwd": {strings.Repeat(filler, 600) + `{"cwd":"/home/alice/webapp","version":"2.1.0"}` + "\n" +
+			strings.Repeat(filler, 400) + title("t"), "t"},
+	}
+	for name, c := range cases {
+		file := filepath.Join(t.TempDir(), "11111111-2222-3333-4444-555555555555.jsonl")
+		if err := os.WriteFile(file, []byte(c.body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		s, err := Load(file)
+		if err != nil || s.Title != c.want || s.Cwd != "/home/alice/webapp" || s.Version != "2.1.0" {
+			t.Errorf("%s: %+v %v", name, s, err)
+		}
+	}
+}
+
+func TestPreview(t *testing.T) {
+	transcript := strings.Join([]string{
+		`{"type":"user","message":{"role":"user","content":"first question"}}`,
+		`{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"hm"},{"type":"text","text":"first answer"}]}}`,
+		`{"type":"user","isMeta":true,"message":{"content":"meta"}}`,
+		`{"type":"user","message":{"content":"<command-name>/rename</command-name>"}}`,
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]}}`,
+		`{"type":"user","message":{"content":[{"type":"tool_result","content":"out"}]}}`,
+		`{"type":"user","message":{"content":[{"type":"text","text":"second question"}]},"timestamp":"2026-11-19T10:00:00Z"}`,
+		`not json`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"` + strings.Repeat("é", 700) + `"}]}}`,
+	}, "\n")
+	msgs, err := Preview(strings.NewReader(transcript), 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, m := range msgs {
+		r := []rune(m.Text)
+		got = append(got, m.Role+":"+string(r[:min(len(r), 15)]))
+	}
+	if want := "[assistant:first answer user:second question assistant:" + strings.Repeat("é", 15) + "]"; fmt.Sprint(got) != want {
+		t.Fatalf("preview = %v", got)
+	}
+	if r := []rune(msgs[2].Text); len(r) != previewChars+1 {
+		t.Fatalf("long message has %d runes", len(r))
+	}
+	if msgs[1].Time.IsZero() {
+		t.Fatal("timestamp lost")
 	}
 }

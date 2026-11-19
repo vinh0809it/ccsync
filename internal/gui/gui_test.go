@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vinh0809it/ccsync/internal/app"
 	"github.com/vinh0809it/ccsync/internal/session"
 	"github.com/vinh0809it/ccsync/internal/testutil"
 )
@@ -160,6 +161,12 @@ func TestFullFlow(t *testing.T) {
 		t.Fatalf("store = %+v", metas)
 	}
 
+	var status map[string]string
+	json.Unmarshal(e.call(t, "GET", "/api/status", nil, true), &status)
+	if len(status) != 1 || status[id] != "same" {
+		t.Fatalf("status = %v, want %s: same", status, id)
+	}
+
 	// Pull resolves symlinks and short names (macOS /var, Windows 8.3 temp
 	// paths); compare against the resolved form.
 	dest, err := session.ResolveProject(filepath.Join(t.TempDir(), "webapp"))
@@ -190,12 +197,31 @@ func TestFullFlow(t *testing.T) {
 		t.Fatal("forced pull did not back up the local copy")
 	}
 
+	// Previews come from either copy; a bad id is refused.
+	for _, from := range []string{"store", "local"} {
+		e.call(t, "GET", "/api/preview?from="+from+"&id="+id, nil, true)
+	}
+	e.call(t, "GET", "/api/preview?from=local&id=../../etc", nil, false)
+
 	// Removal takes exact ids only.
 	e.call(t, "POST", "/api/remove", map[string]any{"ids": []string{"66666666"}}, false)
 	e.call(t, "POST", "/api/remove", map[string]any{"ids": []string{id}}, true)
 	json.Unmarshal(e.call(t, "GET", "/api/store", nil, true), &metas)
 	if len(metas) != 0 {
 		t.Fatalf("store after remove = %+v", metas)
+	}
+
+	var hist struct{ Commits int }
+	json.Unmarshal(e.call(t, "GET", "/api/history", nil, true), &hist)
+	if hist.Commits < 2 {
+		t.Fatalf("history = %+v", hist)
+	}
+
+	// Compacting folds the history (setup, pushes, removal) into one commit.
+	var compacted struct{ Commits int }
+	json.Unmarshal(e.call(t, "POST", "/api/compact", map[string]any{}, true), &compacted)
+	if compacted.Commits < 2 || testutil.Git(t, e.remote, "rev-list", "--count", "HEAD") != "1" {
+		t.Fatalf("compact: %+v, remote has %s commits", compacted, testutil.Git(t, e.remote, "rev-list", "--count", "HEAD"))
 	}
 }
 
@@ -359,4 +385,30 @@ func TestPullManyAPI(t *testing.T) {
 	if res.Pulled != 0 || res.Unchanged != 1 {
 		t.Fatalf("second pull-many: %+v", res)
 	}
+}
+
+// TestProgressAnswersDuringAnOperation: the page polls progress while a
+// push or pull holds the request lock, so progress must not wait for it.
+func TestProgressAnswersDuringAnOperation(t *testing.T) {
+	e := setup(t)
+	s, err := NewServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.srv = httptest.NewServer(s.Handler())
+	e.token = s.Token()
+	t.Cleanup(e.srv.Close)
+
+	s.op.Lock() // an operation is running
+	defer s.op.Unlock()
+	s.progress = app.Progress{Step: "Encrypting", Done: 3, Total: 9}
+	var p app.Progress
+	if err := json.Unmarshal(e.call(t, "GET", "/api/progress", nil, true), &p); err != nil {
+		t.Fatal(err)
+	}
+	if p != s.progress {
+		t.Fatalf("progress = %+v", p)
+	}
+	e.token = "wrong"
+	e.call(t, "GET", "/api/progress", nil, false)
 }

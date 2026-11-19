@@ -61,6 +61,7 @@ ccsync push --all                # push every session of the current project
 ccsync push --all-projects       # push every session of every project
 ccsync ls                        # list what's in the store
 ccsync rm <id>                   # delete a session from the store
+ccsync compact --yes             # drop a git store's history to free space
 
 # on the other machine:
 ccsync pull <id> --to ~/dev/myproject        # one session, to a project you choose
@@ -240,8 +241,11 @@ entries it can't read; running `ccsync migrate` again converts them.
   rewrites and comparisons above. Keep Claude Code versions roughly in sync
   across machines.
 - A git store's history keeps every pushed version, including sessions
-  removed with `ccsync rm`. To reclaim space (or truly erase), start a new
-  store and push again.
+  removed with `ccsync rm`. `ccsync compact --yes` (GUI: the box button next
+  to the store's location) replaces the history with one commit of the
+  current sessions; old versions are then gone, and the git host frees
+  their space on its own schedule. It never overwrites a push it hasn't
+  seen. To be sure old data is erased from the host, start a new store.
 - Big sessions work (blobs are split into 45 MB files, under every git
   host's limit), but each push of one adds its compressed size to a git
   store's history, and pushing or pulling it needs about 3–4× its size in

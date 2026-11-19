@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -431,5 +432,123 @@ func TestLargeBundlesAreSplit(t *testing.T) {
 	}
 	if data, _ := payload(t, st, key, id); string(data) != "small" {
 		t.Fatalf("payload after rewrite: %q", data)
+	}
+}
+
+// TestCompact: the history becomes one commit with the current files,
+// other machines carry on with it, and a push made meanwhile is never
+// overwritten.
+func TestCompact(t *testing.T) {
+	remote := testutil.Remote(t)
+	commits := func() string { return testutil.Git(t, remote, "rev-list", "--count", "HEAD") }
+	a := machine(t)
+	keyA := open(t, a, remote)
+	b := machine(t)
+	keyB := open(t, b, remote)
+	kept, gone := "57575757-aaaa-bbbb-cccc-000000000001", "57575757-aaaa-bbbb-cccc-000000000002"
+	put(t, a, keyA, kept, "v1")
+	put(t, a, keyA, gone, "x")
+	publish(t, a)
+	put(t, a, keyA, kept, "v2")
+	publish(t, a)
+	if _, err := a.Remove(gone); err != nil {
+		t.Fatal(err)
+	}
+	publish(t, a)
+	before := commits()
+
+	if err := a.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	r, err := a.Compact()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(r.Commits) != before || commits() != "1" {
+		t.Fatalf("compacted %d commits (remote had %s), remote now has %s", r.Commits, before, commits())
+	}
+	if data, err := payload(t, a, keyA, kept); err != nil || string(data) != "v2" {
+		t.Fatalf("after compact: %q %v", data, err)
+	}
+
+	// Machine B, synced before, follows the new history and pushes on it.
+	if err := b.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := payload(t, b, keyB, kept); err != nil || string(data) != "v2" {
+		t.Fatalf("machine B after compact: %q %v", data, err)
+	}
+	if _, err := payload(t, b, keyB, gone); err == nil {
+		t.Fatal("machine B still has the removed session")
+	}
+	put(t, b, keyB, "57575757-aaaa-bbbb-cccc-000000000003", "from B")
+	publish(t, b)
+
+	// B pushes again after A synced: compacting must not overwrite it.
+	if err := a.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	put(t, b, keyB, "57575757-aaaa-bbbb-cccc-000000000004", "from B again")
+	publish(t, b)
+	if _, err := a.Compact(); !errors.Is(err, ErrRemoteMoved) {
+		t.Fatalf("compact over an unseen push: %v", err)
+	}
+	if commits() != "3" {
+		t.Fatalf("remote has %s commits, want B's pushes kept", commits())
+	}
+
+	// Already compact: nothing to do.
+	if err := a.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Compact(); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := a.Compact(); err != nil || r.Commits != 1 {
+		t.Fatalf("second compact: %+v %v", r, err)
+	}
+
+	folder := Open(Entry{Name: "f", Kind: KindFolder, Dir: t.TempDir()})
+	if _, err := folder.Compact(); !errors.Is(err, ErrNoHistory) {
+		t.Fatalf("folder store compact: %v", err)
+	}
+}
+
+// TestPushInParts: unpublished commits go up a few at a time, each part
+// reporting its progress, and History counts them.
+func TestPushInParts(t *testing.T) {
+	remote := testutil.Remote(t)
+	st := machine(t)
+	key := open(t, st, remote)
+	for i := 0; i < 12; i++ {
+		put(t, st, key, fmt.Sprintf("58585858-aaaa-bbbb-cccc-%012d", i), "x")
+		if err := st.Commit("test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var parts []int
+	err := st.PushProgress(func(p UploadProgress) {
+		if p.Parts != 3 || p.Done > p.Total {
+			t.Errorf("progress %+v", p)
+		}
+		if len(parts) == 0 || parts[len(parts)-1] != p.Part {
+			parts = append(parts, p.Part)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(parts) != "[1 2 3]" {
+		t.Fatalf("parts = %v", parts)
+	}
+	if testutil.Git(t, remote, "rev-parse", "HEAD") != testutil.Git(t, st.Dir, "rev-parse", "HEAD") {
+		t.Fatal("remote is not at the clone's HEAD")
+	}
+	h, err := st.History()
+	if err != nil || h.Commits != 13 || h.Bytes <= 0 {
+		t.Fatalf("history = %+v %v", h, err)
+	}
+	if _, err := Open(Entry{Name: "f", Kind: KindFolder, Dir: t.TempDir()}).History(); !errors.Is(err, ErrNoHistory) {
+		t.Fatalf("folder history: %v", err)
 	}
 }

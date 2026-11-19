@@ -22,13 +22,14 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		Name     string `json:"name"`
 		Kind     string `json:"kind"`
 		Location string `json:"location"` // repo URL or folder
+		Link     string `json:"link"`     // web page or folder to open, if any
 	}
 	info := func(e store.Entry) storeInfo {
 		kind := string(e.Kind)
 		if kind == "" {
 			kind = string(store.KindGit)
 		}
-		return storeInfo{e.Name, kind, e.Location()}
+		return storeInfo{e.Name, kind, e.Location(), storeLink(e)}
 	}
 	stores := make([]storeInfo, 0, len(reg.Stores))
 	for _, e := range reg.Stores {
@@ -69,7 +70,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, err)
 		return
 	}
-	s.client = client
+	s.setClient(client)
 	ok(w, nil)
 }
 
@@ -93,13 +94,102 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, err)
 		return
 	}
-	s.client = client
+	s.setClient(client)
 	ok(w, nil)
 }
 
 // handleLock forgets the unlocked key, e.g. to switch stores.
 func (s *Server) handleLock(w http.ResponseWriter, r *http.Request) {
-	s.client = nil
+	s.setClient(nil)
+	ok(w, nil)
+}
+
+func (s *Server) handleCompact(w http.ResponseWriter, r *http.Request) {
+	if s.client == nil {
+		fail(w, http.StatusForbidden, errLocked)
+		return
+	}
+	res, err := s.client.Compact()
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err)
+		return
+	}
+	ok(w, res)
+}
+
+// handleHistory reports the size of a git store's history; null for a
+// synced folder, which keeps none.
+func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
+	if s.client == nil {
+		fail(w, http.StatusForbidden, errLocked)
+		return
+	}
+	h, err := s.client.History()
+	if errors.Is(err, store.ErrNoHistory) {
+		ok(w, nil)
+		return
+	}
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err)
+		return
+	}
+	ok(w, h)
+}
+
+// handlePreview returns a session's last messages, from this machine's
+// copy (from=local) or the store's.
+func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
+	if s.client == nil {
+		fail(w, http.StatusForbidden, errLocked)
+		return
+	}
+	id := r.URL.Query().Get("id")
+	if !session.ValidID(id) {
+		fail(w, http.StatusBadRequest, fmt.Errorf("invalid session id"))
+		return
+	}
+	const n = 6
+	if r.URL.Query().Get("from") != "local" {
+		msgs, err := s.client.Preview(id, n)
+		if err != nil {
+			fail(w, http.StatusInternalServerError, err)
+			return
+		}
+		ok(w, msgs)
+		return
+	}
+	// Only a transcript ccsync lists itself is read: never a path from
+	// the request.
+	locals, err := session.ListAll()
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err)
+		return
+	}
+	for _, l := range locals {
+		if l.ID == id {
+			msgs, err := session.PreviewFile(l.File, n)
+			if err != nil {
+				fail(w, http.StatusInternalServerError, err)
+				return
+			}
+			ok(w, msgs)
+			return
+		}
+	}
+	fail(w, http.StatusNotFound, fmt.Errorf("no session %s on this machine", id))
+}
+
+// handleOpen opens the unlocked store's web page or folder. What to open
+// comes from the store's registry entry, never from the request.
+func (s *Server) handleOpen(w http.ResponseWriter, r *http.Request) {
+	s.progMu.Lock()
+	link := s.link
+	s.progMu.Unlock()
+	if link == "" {
+		fail(w, http.StatusBadRequest, errors.New("this store has no page to open"))
+		return
+	}
+	browse(link)
 	ok(w, nil)
 }
 
@@ -120,6 +210,14 @@ func (s *Server) handleForget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ok(w, nil)
+}
+
+// handleProgress reports the running operation's progress (zero: none).
+func (s *Server) handleProgress(w http.ResponseWriter, r *http.Request) {
+	s.progMu.Lock()
+	p := s.progress
+	s.progMu.Unlock()
+	ok(w, p)
 }
 
 func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
@@ -183,6 +281,32 @@ func (s *Server) handleStore(w http.ResponseWriter, r *http.Request) {
 		metas = []store.Meta{}
 	}
 	ok(w, metas)
+}
+
+// handleStatus relates every local session that is also in the store to
+// its store copy: {id: "same"|"ahead"|"behind"|"diverged"|"unknown"},
+// seen from this machine. Ids on one side only are absent.
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	if s.client == nil {
+		fail(w, http.StatusForbidden, errLocked)
+		return
+	}
+	locals, err := session.ListAll()
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err)
+		return
+	}
+	// The page abandons this request when it switches store; stop then.
+	rels, err := s.client.Status(r.Context(), locals)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err)
+		return
+	}
+	out := make(map[string]string, len(rels))
+	for id, rel := range rels {
+		out[id] = rel.String()
+	}
+	ok(w, out)
 }
 
 func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {

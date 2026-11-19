@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -45,8 +46,10 @@ var validID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,63}$`)
 func ValidID(id string) bool { return validID.MatchString(id) }
 
 // Load reads a session's metadata without depending on the full line
-// schema. The whole transcript is scanned: a rename appends a new
-// custom-title line, so the last one wins.
+// schema. A big transcript is read only at both ends: the cwd and version
+// are in its first lines, and the title is the last custom-title line,
+// which Claude Code appends on a rename and re-appends as the session
+// goes on, so the latest one sits near the end.
 func Load(file string) (Session, error) {
 	id := strings.TrimSuffix(filepath.Base(file), ".jsonl")
 	s := Session{ID: id, File: file, Dir: filepath.Join(filepath.Dir(file), id)}
@@ -68,14 +71,60 @@ func Load(file string) (Session, error) {
 		return s, err
 	}
 	defer f.Close()
+	size := info.Size()
+	if size <= headBytes+tailBytes {
+		err := s.scanMeta(f)
+		return s, err
+	}
+	if err := s.scanMeta(io.LimitReader(f, headBytes)); err != nil {
+		return s, err
+	}
+	if _, err := f.Seek(size-tailBytes, io.SeekStart); err != nil {
+		return s, err
+	}
+	// The window starts mid-line: skip to the next line.
+	tail := bufio.NewReader(io.LimitReader(f, tailBytes))
+	if _, err := tail.ReadBytes('\n'); err != nil {
+		// One line fills the whole window: read everything.
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return s, err
+		}
+		s = Session{ID: s.ID, File: s.File, Dir: s.Dir, Mtime: s.Mtime, Size: s.Size}
+		err := s.scanMeta(f)
+		return s, err
+	}
+	if err := s.scanMeta(tail); err != nil {
+		return s, err
+	}
+	if s.Cwd == "" || s.Version == "" { // not in the first lines: look everywhere
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return s, err
+		}
+		title := s.Title
+		err = s.scanMeta(f)
+		if title != "" {
+			s.Title = title // the tail's is the latest
+		}
+	}
+	return s, err
+}
 
+// The ends of a transcript Load reads; a smaller one is read whole.
+const (
+	headBytes = 256 << 10
+	tailBytes = 1 << 20
+)
+
+// scanMeta reads metadata fields from transcript lines: the first cwd and
+// version, and the last title.
+func (s *Session) scanMeta(r io.Reader) error {
 	type line struct {
 		Type        string `json:"type"`
 		CustomTitle string `json:"customTitle"`
 		Cwd         string `json:"cwd"`
 		Version     string `json:"version"`
 	}
-	sc := bufio.NewScanner(f)
+	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 1024*1024), 64*1024*1024)
 	for sc.Scan() {
 		b := sc.Bytes()
@@ -88,7 +137,7 @@ func Load(file string) (Session, error) {
 		}
 		var l line
 		if json.Unmarshal(b, &l) != nil {
-			continue
+			continue // also a line cut by the head window
 		}
 		if l.Type == "custom-title" && l.CustomTitle != "" {
 			s.Title = l.CustomTitle
@@ -100,7 +149,7 @@ func Load(file string) (Session, error) {
 			s.Version = l.Version
 		}
 	}
-	return s, sc.Err()
+	return sc.Err()
 }
 
 // walkCompanion calls fn for every regular file under a companion

@@ -51,7 +51,16 @@ var (
 	ErrNothingToCommit = errors.New("nothing new to push")
 	// ErrRemoteMoved means another machine pushed first.
 	ErrRemoteMoved = errors.New("the remote changed during the push")
+	// ErrNoHistory means the store keeps no history to compact.
+	ErrNoHistory = errors.New("a synced-folder store keeps no history — there is nothing to compact")
 )
+
+// CompactResult is what Compact did.
+type CompactResult struct {
+	Commits int   `json:"commits"` // in the history before; 1 means it was already compact
+	Before  int64 `json:"before"`  // bytes the local clone's history took
+	After   int64 `json:"after"`
+}
 
 // Meta is the per-session metadata blob (stored encrypted).
 type Meta struct {
@@ -65,7 +74,11 @@ type Meta struct {
 	SessionMtime  time.Time `json:"session_mtime"`
 	Size          int64     `json:"size"`
 	ContentHash   string    `json:"content_hash,omitempty"` // sha256 of the uncompressed bundle
-	PushedAt      time.Time `json:"pushed_at"`
+	// Entries fingerprints the transcript's entries (session.Fingerprint),
+	// so a copy elsewhere can be found in sync without decrypting the
+	// bundle. Empty for copies pushed before ccsync 0.2.0.
+	Entries  string    `json:"entries,omitempty"`
+	PushedAt time.Time `json:"pushed_at"`
 }
 
 // Store is one store as this machine sees it.
@@ -151,7 +164,7 @@ func (s *Store) create(passphrase string) error {
 	if err := s.t.commit("ccsync: initialize store"); err != nil {
 		return err
 	}
-	return s.t.push()
+	return s.t.push(nil)
 }
 
 // writeKeyFiles writes the current-format marker, check file and wrapped key.
@@ -209,7 +222,26 @@ func (s *Store) Commit(message string) error { return s.t.commit(message) }
 
 // Push publishes committed changes; ErrRemoteMoved (wrapped) when another
 // machine pushed first, in which case the caller re-syncs and retries.
-func (s *Store) Push() error { return s.t.push() }
+func (s *Store) Push() error { return s.t.push(nil) }
+
+// PushProgress is Push, telling progress how the upload advances.
+func (s *Store) PushProgress(progress func(UploadProgress)) error { return s.t.push(progress) }
+
+// History is the size of a git store's history (see Store.History).
+type History struct {
+	Commits int   `json:"commits"`
+	Bytes   int64 `json:"bytes"` // this machine's clone; the remote's is about the same
+}
+
+// History reports how much the store's history holds, to tell when
+// Compact is worth it. ErrNoHistory for a synced folder.
+func (s *Store) History() (History, error) { return s.t.history() }
+
+// Compact replaces the store's history with a single commit holding its
+// current files, so replaced and deleted versions stop taking space. Old
+// versions can't be recovered afterwards. ErrRemoteMoved (wrapped) when
+// another machine pushed meanwhile; ErrNoHistory for a synced folder.
+func (s *Store) Compact() (CompactResult, error) { return s.t.compact() }
 
 // Forget removes what this machine keeps of the store — for a git store
 // its clone — never the shared copy itself.

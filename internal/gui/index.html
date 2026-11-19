@@ -5,97 +5,184 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ccsync</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%235a48f5'/%3E%3Cstop offset='1' stop-color='%237b6bff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='256' height='256' rx='56' fill='url(%23g)'/%3E%3Cg fill='none' stroke='white' stroke-width='18' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M56 128a72 72 0 0 1 123-51l21 21'/%3E%3Cpath d='M200 56v40h-40'/%3E%3Cpath d='M200 128a72 72 0 0 1-123 51l-21-21'/%3E%3Cpath d='M56 200v-40h40'/%3E%3C/g%3E%3C/svg%3E">
+<script>
+// Theme: the page's own choice if one was made, else the system's.
+try { const t = localStorage.getItem('ccsync-theme'); if (t) document.documentElement.dataset.theme = t; } catch {}
+</script>
 <style>
   :root {
-    --bg: #eef1f6; --bg2: #e4e8f0; --card: #ffffff; --card2: #f7f9fc;
-    --ink: #17203a; --muted: #5f6b85; --faint: #8b95ab;
-    --line: #e1e6f0; --line2: #eef1f7;
-    --accent: #5a48f5; --accent2: #7b6bff; --accent-ink: #ffffff;
-    --accent-soft: #ece9ff;
-    --ok: #16875a; --warn: #b3560e; --warn-soft: #fdeede; --err: #c62a2a;
-    --shadow: 0 1px 2px rgba(23,32,58,.06), 0 8px 28px rgba(23,32,58,.08);
-    --shadow-lg: 0 12px 48px rgba(23,32,58,.22);
-    --radius: 16px;
+    color-scheme: light;
+    --bg: #eceff8; --bg2: #e6e9f4; --card: #ffffff; --card2: #f4f5fb;
+    --ink: #0f1429; --muted: #4f586f; --faint: #8189a1;
+    --line: #dbdfeb; --line2: #eaedf5;
+    --field: #ffffff; --head: linear-gradient(180deg, #fafbff, #ffffff);
+    --accent: #5b47f0; --accent2: #8b5cf6; --accent-ink: #ffffff;
+    --accent-soft: #eeebff;
+    --ok: #127a50; --warn: #a94f0b; --warn-soft: #fdeede; --err: #c42b2b;
+    --shadow: 0 1px 2px rgba(16,24,48,.06), 0 16px 40px -18px rgba(40,36,120,.28);
+    --shadow-lg: 0 18px 60px rgba(20,26,46,.24);
+    --glow1: rgba(110,86,255,.22); --glow2: rgba(236,72,153,.13); --glow3: rgba(14,165,233,.17);
+    --dots: rgba(40,48,90,.08);
+    --field-shadow: inset 0 1px 2px rgba(16,24,48,.05);
+    --radius: 18px;
   }
+  /* Dark: by the system's choice unless the page picked light, or picked dark. */
   @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0c0f17; --bg2: #0f131d; --card: #161b28; --card2: #1c2231;
-      --ink: #eaeef8; --muted: #98a3bd; --faint: #6b7592;
-      --line: #262d3e; --line2: #202636;
-      --accent: #7d6dff; --accent2: #9a8cff; --accent-ink: #0a0d15;
-      --accent-soft: #221f3d;
-      --ok: #4fc98a; --warn: #f0a35e; --warn-soft: #2c2213; --err: #ff6b6b;
-      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 34px rgba(0,0,0,.45);
-      --shadow-lg: 0 16px 60px rgba(0,0,0,.6);
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #090b12; --bg2: #0c0f19; --card: #131827; --card2: #191f31;
+      --ink: #ecefff; --muted: #9aa3bf; --faint: #6c7594;
+      --line: #252c42; --line2: #1d2336;
+      --field: #191f31; --head: transparent; --field-shadow: none;
+      --accent: #8b7bff; --accent2: #c084fc; --accent-ink: #0b0d16;
+      --accent-soft: #241f45;
+      --ok: #4fd08f; --warn: #f2a65f; --warn-soft: #2d2314; --err: #ff6f6f;
+      --shadow: 0 1px 2px rgba(0,0,0,.35), 0 14px 40px -10px rgba(0,0,0,.6);
+      --shadow-lg: 0 20px 70px rgba(0,0,0,.65);
+      --glow1: rgba(139,123,255,.18); --glow2: rgba(236,72,153,.10); --glow3: rgba(14,165,233,.09);
+      --dots: rgba(255,255,255,.05);
     }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #090b12; --bg2: #0c0f19; --card: #131827; --card2: #191f31;
+    --ink: #ecefff; --muted: #9aa3bf; --faint: #6c7594;
+    --line: #252c42; --line2: #1d2336;
+    --field: #191f31; --head: transparent; --field-shadow: none;
+    --accent: #8b7bff; --accent2: #c084fc; --accent-ink: #0b0d16;
+    --accent-soft: #241f45;
+    --ok: #4fd08f; --warn: #f2a65f; --warn-soft: #2d2314; --err: #ff6f6f;
+    --shadow: 0 1px 2px rgba(0,0,0,.35), 0 14px 40px -10px rgba(0,0,0,.6);
+    --shadow-lg: 0 20px 70px rgba(0,0,0,.65);
+    --glow1: rgba(139,123,255,.18); --glow2: rgba(236,72,153,.10); --glow3: rgba(14,165,233,.09);
+    --dots: rgba(255,255,255,.05);
   }
   * { box-sizing: border-box; margin: 0; }
   html, body { height: 100%; }
   body {
-    background:
-      radial-gradient(1200px 600px at 100% -10%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 60%),
-      radial-gradient(1000px 500px at -10% 110%, color-mix(in srgb, var(--accent2) 10%, transparent), transparent 55%),
-      linear-gradient(180deg, var(--bg), var(--bg2));
+    background-color: var(--bg);
+    background-image:
+      radial-gradient(900px 520px at 88% -8%, var(--glow1), transparent 62%),
+      radial-gradient(700px 420px at 0% 0%, var(--glow3), transparent 60%),
+      radial-gradient(800px 520px at 40% 115%, var(--glow2), transparent 60%),
+      radial-gradient(var(--dots) 1px, transparent 1.4px);
+    background-size: auto, auto, auto, 22px 22px;
+    background-attachment: fixed;
     color: var(--ink);
-    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font: 15px/1.55 "Inter", "Segoe UI Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     min-height: 100%;
+    -webkit-font-smoothing: antialiased;
   }
   button { font: inherit; cursor: pointer; border: 0; }
   button:disabled { opacity: .5; cursor: default; }
+  /* Focus rings only while the keyboard is in use (html.kbd): some web
+     views ring every programmatically focused button, e.g. a dialog's
+     default button or the one focus returns to after it closes. */
+  :focus { outline: none; }
+  html.kbd :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .hidden { display: none !important; }
-  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .mono { font-family: ui-monospace, "JetBrains Mono", SFMono-Regular, Menlo, Consolas, monospace; }
   .muted { color: var(--muted); }
+  .ell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* App bar */
   .appbar {
     position: sticky; top: 0; z-index: 20;
-    display: flex; align-items: center; gap: 14px;
-    padding: 14px clamp(16px, 4vw, 40px);
-    background: color-mix(in srgb, var(--card) 82%, transparent);
-    backdrop-filter: saturate(1.4) blur(14px);
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px clamp(16px, 3vw, 30px);
+    background: color-mix(in srgb, var(--card) 72%, transparent);
+    backdrop-filter: saturate(1.5) blur(16px);
     border-bottom: 1px solid var(--line);
   }
-  .brand { display: flex; align-items: center; gap: 11px; }
+  .brand { display: flex; align-items: center; gap: 12px; flex: none; }
   .logo {
-    width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center;
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
-    box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 45%, transparent);
+    width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; flex: none;
+    background: linear-gradient(135deg, #5b47f0, #8b5cf6 55%, #ec4899);
+    box-shadow: 0 6px 18px rgba(91,71,240,.38), inset 0 1px 0 rgba(255,255,255,.25);
   }
-  .brand b { font-size: 17px; letter-spacing: -.02em; }
-  .brand span { font-size: 12px; color: var(--muted); display: block; margin-top: -2px; }
+  .wordmark { font-size: 21px; font-weight: 800; letter-spacing: -.035em; line-height: 1; }
+  .tagline { font-size: 12.5px; color: var(--muted); padding-left: 12px; border-left: 1px solid var(--line);
+    line-height: 1.25; }
   .spacer { flex: 1; }
-  .chip {
-    display: inline-flex; align-items: center; gap: 7px; max-width: 42vw;
-    padding: 6px 12px; border-radius: 999px; font-size: 12.5px;
-    background: var(--card2); border: 1px solid var(--line); color: var(--muted);
+  @media (max-width: 760px) { .tagline { display: none; } }
+
+  /* The current store, and the way back to the store list */
+  .storebtn {
+    display: inline-flex; align-items: center; gap: 10px; min-width: 0; max-width: min(360px, 46vw);
+    padding: 5px 8px 5px 5px; border-radius: 12px; text-align: left;
+    background: var(--card); color: var(--ink); border: 1px solid var(--line);
+    box-shadow: 0 1px 2px rgba(0,0,0,.05);
+    transition: border-color .12s, box-shadow .12s, background .12s;
   }
-  .chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none;
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
-  .chip .repo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .storebtn:not(:disabled):hover { border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft); }
+  .storebtn .kicon { width: 30px; height: 30px; border-radius: 8px; flex: none; display: grid;
+    place-items: center; background: var(--accent-soft); color: var(--accent); }
+  .storebtn .txt { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+  .storebtn small { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--faint); }
+  .storebtn b { font-size: 13.5px; }
+  .storebtn .swap { flex: none; display: inline-flex; align-items: center; gap: 6px; margin-left: 4px;
+    padding: 5px 9px; border-radius: 8px; font-size: 12.5px; font-weight: 600;
+    background: var(--card2); border: 1px solid var(--line); color: var(--muted); }
+  .storebtn:not(:disabled):hover .swap { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+  .storebtn:disabled { opacity: 1; cursor: progress; }
+  .storebtn:disabled .swap { color: var(--accent); }
+  @media (max-width: 560px) { .storebtn .swap span:last-child { display: none; } }
+
+  .themebtn { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; flex: none;
+    background: var(--card); color: var(--muted); border: 1px solid var(--line); }
+  .themebtn:hover { color: var(--accent); border-color: var(--accent); }
+  .themebtn .moon { display: none; }
+  :root[data-theme="dark"] .themebtn .moon { display: block; }
+  :root[data-theme="dark"] .themebtn .sun { display: none; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .themebtn .moon { display: block; }
+    :root:not([data-theme="light"]) .themebtn .sun { display: none; }
+  }
 
   /* Layout */
-  .wrap { max-width: 1500px; margin: 0 auto; padding: clamp(16px, 3vw, 30px); }
+  .wrap { max-width: 1500px; margin: 0 auto; padding: clamp(16px, 2.6vw, 28px); }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(16px, 2vw, 24px);
     align-items: start; }
   @media (max-width: 940px) { .grid { grid-template-columns: 1fr; } }
-
   .card {
     background: var(--card); border: 1px solid var(--line);
     border-radius: var(--radius); box-shadow: var(--shadow);
     display: flex; flex-direction: column; overflow: hidden;
-    max-height: calc(100vh - 150px);
+    height: calc(100vh - 128px); min-height: 420px;
   }
-  @media (max-width: 940px) { .card { max-height: none; } }
-  .card-head { padding: 18px 20px 14px; border-bottom: 1px solid var(--line2);
+  @media (max-width: 940px) { .card { height: auto; max-height: none; } }
+  .card-head { padding: 16px 18px 14px; border-bottom: 1px solid var(--line2); background: var(--head);
     display: flex; flex-direction: column; gap: 12px; }
-  .card-head .titlerow { display: flex; align-items: center; gap: 10px; }
-  .card-head h2 { font-size: 15px; letter-spacing: -.01em; }
-  .card-head h2 .count { color: var(--faint); font-weight: 500; margin-left: 6px; }
+  .card-head .titlerow { display: flex; align-items: center; gap: 10px; min-height: 34px; }
+  .card-head h2 { font-size: 16px; letter-spacing: -.02em; display: flex; align-items: center; gap: 10px;
+    flex: none; }
+  .card-head h2 .count { color: var(--muted); font-weight: 600; font-size: 12px; padding: 1px 8px;
+    border-radius: 999px; background: var(--card2); border: 1px solid var(--line); }
+  .card-head h2 .count:empty { display: none; }
+  .hicon { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; flex: none;
+    color: #fff; background: linear-gradient(135deg, var(--accent), var(--accent2)); }
+  .hicon.alt { background: linear-gradient(135deg, #0ea5e9, #6366f1); }
   .card-body { overflow-y: auto; padding: 6px 10px 12px; flex: 1; min-height: 120px; }
 
+  /* Where the store lives: sits level with the project picker */
+  .locbar { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 6px 0 12px;
+    border-radius: 10px; background: var(--field); border: 1px solid var(--line); min-width: 0;
+    box-shadow: var(--field-shadow); }
+  /* The project picker carries an icon like the store's location */
+  .selbox { position: relative; }
+  .selbox .kind { position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+    color: var(--accent); display: grid; pointer-events: none; }
+  .selbox select { padding-left: 38px; padding-right: 32px; text-overflow: ellipsis; }
+  .locbar .kind { color: var(--accent); flex: none; display: grid; place-items: center; }
+  .locbar .where { flex: 1; min-width: 0; font-size: 13px; color: var(--ink); }
+  .locbar .iconbtn { width: 30px; height: 30px; }
+  #projectSel { height: 44px; }
   select {
     width: 100%; padding: 10px 12px; border-radius: 10px; font: inherit;
-    background: var(--card2); color: var(--ink); border: 1px solid var(--line);
+    background-color: var(--field); color: var(--ink); border: 1px solid var(--line);
+    box-shadow: var(--field-shadow);
     -webkit-appearance: none; appearance: none;
     background-image: linear-gradient(45deg, transparent 50%, var(--faint) 50%),
                       linear-gradient(135deg, var(--faint) 50%, transparent 50%);
@@ -104,8 +191,10 @@
   }
   input[type=text], input[type=password], input:not([type]) {
     width: 100%; padding: 10px 12px; border-radius: 10px; font: inherit;
-    background: var(--card2); color: var(--ink); border: 1px solid var(--line);
+    background: var(--field); color: var(--ink); border: 1px solid var(--line);
+    box-shadow: var(--field-shadow);
   }
+  input::placeholder { color: var(--faint); }
   input:focus, select:focus { outline: none; border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-soft); }
   label { display: block; font-size: 12.5px; color: var(--muted); margin: 12px 0 5px;
@@ -127,18 +216,14 @@
     box-shadow: none; }
   .btn.ghost:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
   .btn.sm { padding: 6px 12px; font-size: 13px; }
+  .btn:not(.ghost):disabled { opacity: 1; background: var(--line2); color: var(--faint); box-shadow: none;
+    border: 1px solid var(--line); }
   .linkbtn { background: none; border: none; padding: 0; color: var(--accent); font: inherit;
     font-size: 13px; cursor: pointer; }
   .linkbtn:hover { text-decoration: underline; }
-  .seg { display: flex; flex-wrap: wrap; gap: 8px; }
-  .seg label { display: flex; align-items: center; gap: 6px; margin: 0; padding: 7px 12px; border: 1px solid var(--line);
-    border-radius: 10px; color: var(--ink); font-size: 13px; cursor: pointer; background: var(--card2); }
-  .seg label:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
-  .seg label:has(input:disabled) { opacity: .5; cursor: not-allowed; }
-  .kindbox .note { margin-top: 10px; }
-  .lock-links { display: flex; justify-content: space-between; gap: 12px; margin-top: 18px; }
   .btn.ghost.danger:not(:disabled):hover { border-color: var(--err); color: var(--err); }
-  .btn.danger-solid { background: var(--err); color: #fff; }
+  .btn.danger-solid { background: #d42a2a; color: #fff; box-shadow: 0 4px 14px rgba(212,42,42,.3); }
+  .btn.danger-solid:not(:disabled):hover { box-shadow: 0 7px 20px rgba(212,42,42,.4); }
 
   .search { position: relative; display: flex; align-items: center; }
   .search svg { position: absolute; left: 12px; color: var(--faint); pointer-events: none; }
@@ -172,22 +257,55 @@
   .row .main { flex: 1; min-width: 0; }
   .row .ttl { font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 8px; }
   .row .ttl .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .row .sub { font-size: 12px; color: var(--faint); margin-top: 2px; }
+  .row .sub { font-size: 12px; color: var(--faint); margin-top: 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .row .side { text-align: right; flex: none; }
   .row .side .t { font-size: 12px; color: var(--muted); }
   .row .side .s { font-size: 11.5px; color: var(--faint); }
+  @media (max-width: 560px) { .row .side { display: none; } .summary { display: none; } }
   .badge { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
-    letter-spacing: .03em; text-transform: uppercase; flex: none; white-space: nowrap; }
+    letter-spacing: .03em; text-transform: uppercase; flex: none; white-space: nowrap;
+    background: var(--line2); color: var(--muted); }
   .badge.active { background: var(--warn); color: #fff; }
+  .badge.ok { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
+  .badge.acc { background: var(--accent-soft); color: var(--accent); }
+  .badge.err { background: color-mix(in srgb, var(--err) 13%, transparent); color: var(--err); }
+  .badge.dim { background: transparent; color: var(--faint); border: 1px dashed var(--line); }
+  .summary { font-size: 12px; color: var(--muted); min-width: 0; flex: 1;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .summary b { font-weight: 600; }
+  .filterchip { font: inherit; font-size: 12px; color: var(--muted); padding: 3px 10px; border-radius: 999px;
+    background: var(--card2); border: 1px dashed var(--line); white-space: nowrap; }
+  .filterchip:hover { color: var(--accent); border-color: var(--accent); }
+  .filterchip.on { color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent); }
   .badge.warn { background: var(--warn-soft); color: var(--warn); }
   .rule { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
   .rule input { flex: 1; min-width: 0; }
   .rule .arrow { color: var(--faint); }
   .empty { text-align: center; color: var(--faint); padding: 40px 20px; font-size: 13.5px; }
+  .loading { display: flex; align-items: center; justify-content: center; gap: 10px;
+    color: var(--muted); padding: 40px 20px; font-size: 13.5px; }
+  .loading .spin { color: var(--accent); }
+
+  /* Progress of a running push / pull */
+  .prog { margin-top: 14px; }
+  .prog-top { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px;
+    color: var(--muted); margin-bottom: 6px; }
+  .prog-track { height: 6px; border-radius: 999px; background: var(--line); overflow: hidden; }
+  .prog-bar { height: 100%; width: 0; border-radius: 999px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width .3s ease; }
+  .prog-bar.indet { width: 35%; animation: indet 1.1s ease-in-out infinite; }
+  @keyframes indet { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+  @media (prefers-reduced-motion: reduce) { .prog-bar.indet { animation: none; width: 100%; opacity: .5; } }
 
   /* Store rows carry a pull button on the side */
-  .row.store { cursor: default; }
   .row.store:hover { background: var(--card2); }
+  .row .acts { display: flex; gap: 4px; flex: none; }
+  .iconbtn { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center;
+    background: transparent; color: var(--muted); border: 1px solid transparent; }
+  .iconbtn:hover { background: var(--card); border-color: var(--line); color: var(--accent); }
+  .iconbtn.danger:hover { color: var(--err); }
+  html.kbd .iconbtn:focus-visible { outline-offset: 1px; }
 
   /* Spinner */
   .spin { width: 15px; height: 15px; border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
@@ -195,15 +313,111 @@
     animation: spin .65s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  /* Lock / setup screen */
-  .lockwrap { min-height: calc(100vh - 66px); display: grid; place-items: center;
-    padding: 24px; }
-  .lockcard { width: 100%; max-width: 460px; background: var(--card);
-    border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow);
-    padding: 30px 28px; }
-  .lockcard .logo { width: 46px; height: 46px; border-radius: 13px; margin-bottom: 16px; }
-  .lockcard h1 { font-size: 21px; letter-spacing: -.02em; }
-  .lockcard .note { margin: 8px 0 4px; }
+  /* Start screens: a brand panel beside the store picker / setup form */
+  .lockwrap { min-height: 100vh; display: grid; grid-template-columns: minmax(340px, 46%) 1fr; }
+  .lockwrap > * { min-width: 0; }
+  @media (max-width: 900px) { .lockwrap { grid-template-columns: 1fr; } }
+  .hero {
+    position: relative; overflow: hidden; color: #fff;
+    padding: clamp(28px, 5vw, 56px); display: flex; flex-direction: column; gap: 28px;
+    background:
+      radial-gradient(600px 420px at 85% 10%, rgba(236,72,153,.45), transparent 60%),
+      radial-gradient(520px 520px at 0% 100%, rgba(14,165,233,.40), transparent 62%),
+      linear-gradient(150deg, #1b1046 0%, #3a1fa8 45%, #5b2bd6 100%);
+  }
+  .hero::before { /* faint grid */
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background-image: linear-gradient(rgba(255,255,255,.06) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(255,255,255,.06) 1px, transparent 1px);
+    background-size: 36px 36px;
+    mask-image: radial-gradient(ellipse at 30% 40%, #000 30%, transparent 80%);
+  }
+  .hero > * { position: relative; }
+  .hero .brand .logo { width: 44px; height: 44px; border-radius: 13px; background: rgba(255,255,255,.14);
+    border: 1px solid rgba(255,255,255,.28); box-shadow: 0 8px 24px rgba(0,0,0,.25); backdrop-filter: blur(6px); }
+  .hero .wordmark { font-size: 26px; }
+  .hero h1 { font-size: clamp(28px, 3.4vw, 44px); line-height: 1.08; letter-spacing: -.035em; font-weight: 800;
+    max-width: 14ch; margin-top: auto; }
+  .hero h1 em { font-style: normal; background: linear-gradient(90deg, #f9a8d4, #c4b5fd 50%, #7dd3fc);
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .hero p.lead { color: rgba(255,255,255,.82); font-size: 15.5px; max-width: 44ch; }
+  .feats { list-style: none; padding: 0; display: grid; gap: 12px; margin-bottom: auto; }
+  .feats li { display: flex; gap: 12px; align-items: flex-start; font-size: 14px; color: rgba(255,255,255,.9); }
+  .feats li b { display: block; color: #fff; }
+  .feats li span.i { width: 32px; height: 32px; border-radius: 9px; flex: none; display: grid; place-items: center;
+    background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.2); }
+  .feats li small { color: rgba(255,255,255,.7); font-size: 13px; }
+  .syncart { width: 100%; max-width: 440px; height: auto; }
+  .syncart .flow { stroke-dasharray: 3 7; animation: flow 1.4s linear infinite; }
+  .syncart .flow.rev { animation-direction: reverse; }
+  @keyframes flow { to { stroke-dashoffset: -20; } }
+  @media (prefers-reduced-motion: reduce) { .syncart .flow { animation: none; } }
+  @media (max-width: 900px) {
+    .hero { gap: 16px; padding-bottom: 28px; }
+    .hero h1 { margin-top: 8px; font-size: 28px; max-width: none; }
+    .feats, .syncart { display: none; }
+  }
+
+  .lockpane { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; padding: 72px clamp(16px, 5vw, 56px) 40px; }
+  .lockpane .themebtn { position: absolute; top: 18px; right: 18px; }
+  .lockcard { width: 100%; max-width: 500px; }
+  .lockcard h2.big { font-size: 30px; letter-spacing: -.035em; line-height: 1.15; }
+  .lockcard h2.big + .note { margin: 8px 0 22px; font-size: 14px; }
+  .lockcard .note b { color: var(--ink); }
+  .btn.block { width: 100%; padding: 12px 16px; margin-top: 18px; font-size: 15px; }
+  .backlink { margin-bottom: 18px; display: inline-flex; align-items: center; gap: 4px; }
+
+  /* Choice cards: store picker and store kinds */
+  .picks { display: flex; flex-direction: column; gap: 8px; max-height: 42vh; overflow-y: auto; padding: 3px; margin: -3px; }
+  .kinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  @media (max-width: 520px) { .kinds { grid-template-columns: 1fr; } }
+  .pick { position: relative; display: flex; align-items: center; gap: 12px; margin: 0; padding: 12px 14px;
+    border: 1px solid var(--line); border-radius: 14px; background: var(--card);
+    color: var(--ink); cursor: pointer; transition: border-color .12s, background .12s, box-shadow .12s, transform .12s; }
+  .pick:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); transform: translateY(-1px); }
+  .pick:has(input:checked) { border-color: var(--accent); background: var(--accent-soft);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
+  html.kbd .pick:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .pick:has(input:disabled) { opacity: .5; cursor: not-allowed; transform: none; }
+  .pick input { position: absolute; opacity: 0; pointer-events: none; }
+  .pick .kicon { width: 38px; height: 38px; border-radius: 11px; flex: none; display: grid;
+    place-items: center; background: var(--card2); border: 1px solid var(--line); color: var(--accent); }
+  .pick:has(input:checked) .kicon { background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #fff; border-color: transparent; }
+  .pick .ptxt { min-width: 0; flex: 1; display: flex; flex-direction: column; }
+  .pick .ptxt b { font-size: 14.5px; }
+  .pick .ptxt small { font-size: 12px; color: var(--muted); }
+  .pick .tick { width: 20px; height: 20px; border-radius: 50%; flex: none; border: 2px solid var(--line);
+    display: grid; place-items: center; }
+  .pick:has(input:checked) .tick { border-color: var(--accent); background: var(--accent); }
+  .pick:has(input:checked) .tick::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #fff; }
+  .kinds .pick { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .kinds .pick .ptxt small { line-height: 1.35; }
+  /* "Add a store": a tile at the end of the store list */
+  .addtile { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border-radius: 14px;
+    background: transparent; color: var(--muted); border: 1.5px dashed color-mix(in srgb, var(--faint) 55%, transparent); text-align: left;
+    transition: border-color .12s, color .12s, background .12s; }
+  .addtile:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+  .addtile .kicon { width: 38px; height: 38px; border-radius: 11px; flex: none; display: grid; place-items: center;
+    background: var(--card2); border: 1px solid var(--line); }
+  .addtile b { display: block; font-size: 14.5px; color: var(--ink); }
+  .addtile:hover b { color: var(--accent); }
+  .addtile small { font-size: 12px; }
+  .kindbox { margin-top: 4px; }
+  .kindbox .note { margin-top: 12px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+  @media (max-width: 520px) { .cols { grid-template-columns: 1fr; } }
+  .pw { position: relative; }
+  .pw input { padding-right: 64px; }
+  .pw .eye { position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+    background: none; color: var(--muted); font-size: 12px; font-weight: 600; padding: 6px 8px;
+    border-radius: 8px; }
+  .pw .eye:hover { color: var(--accent); background: var(--accent-soft); }
+  .alert { margin-top: 14px; padding: 10px 12px; border-radius: 10px; font-size: 13px;
+    color: var(--err); background: color-mix(in srgb, var(--err) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--err) 28%, transparent); }
+  .lock-links { display: flex; justify-content: center; margin-top: 14px; }
+  .linkbtn.subtle { color: var(--muted); }
 
   /* Dialogs — centered, the * { margin:0 } reset is overridden here */
   dialog {
@@ -214,11 +428,62 @@
   dialog::backdrop { background: rgba(10,12,22,.5); backdrop-filter: blur(3px); }
   dialog[open] { animation: pop .16s ease-out; }
   @keyframes pop { from { transform: scale(.96); opacity: 0; } }
-  .dlg-head { padding: 20px 22px 8px; }
+  dialog[open] { display: flex; flex-direction: column; max-height: min(88vh, 780px); }
+  .dlg-head { padding: 20px 22px 8px; flex: none; }
   .dlg-head h2 { font-size: 17px; letter-spacing: -.01em; }
-  .dlg-body { padding: 4px 22px; }
-  .dlg-foot { padding: 16px 22px 20px; display: flex; align-items: center; gap: 10px; }
-  .pushlist { list-style: none; padding: 0; margin: 8px 0; max-height: 44vh; overflow-y: auto; }
+  .dlg-head.ask { display: flex; align-items: center; gap: 12px; padding-top: 22px; }
+  .dlg-icon { width: 40px; height: 40px; border-radius: 12px; flex: none; display: grid; place-items: center;
+    color: var(--err); background: color-mix(in srgb, var(--err) 13%, transparent); }
+  #askBody p + p, #askBody p + .kl, #askBody .kl + p { margin-top: 12px; }
+  #askBody .histnow { padding: 8px 12px; border-radius: 10px; background: var(--card2); border: 1px solid var(--line); color: var(--ink); }
+  #askBody .histnow.big { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
+  #askBody .fine { font-size: 12px; color: var(--faint); }
+  /* What an action keeps and what it loses, side by side */
+  .kl { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 520px) { .kl { grid-template-columns: 1fr; } }
+  .kl > div { border-radius: 12px; padding: 12px 14px; border: 1px solid; }
+  .kl .keep { background: color-mix(in srgb, var(--ok) 8%, transparent); border-color: color-mix(in srgb, var(--ok) 25%, transparent); }
+  .kl .lose { background: color-mix(in srgb, var(--err) 8%, transparent); border-color: color-mix(in srgb, var(--err) 25%, transparent); }
+  .kl h4 { font-size: 12px; letter-spacing: .05em; text-transform: uppercase; margin-bottom: 6px; }
+  .kl .keep h4 { color: var(--ok); } .kl .lose h4 { color: var(--err); }
+  .kl ul { list-style: none; padding: 0; display: grid; gap: 5px; color: var(--ink); font-size: 13px; }
+  .kl li { display: flex; gap: 7px; align-items: baseline; }
+  .kl .keep li::before { content: "✓"; color: var(--ok); font-weight: 700; }
+  .kl .lose li::before { content: "✕"; color: var(--err); font-weight: 700; }
+  .dlg-body { padding: 4px 22px; overflow-y: auto; min-height: 0; flex: 1; }
+  .dlg-body:focus { outline: none; }
+  /* Progress and results sit outside the scrolling body: always in view. */
+  .dlg-status { padding: 0 22px; flex: none; }
+  .dlg-status:not(:has(> :not(.hidden))) { display: none; }
+  .dlg-status .donebox { max-height: 30vh; overflow-y: auto; }
+  .dlg-foot { padding: 16px 22px 20px; display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex: none;
+    border-top: 1px solid var(--line2); margin-top: 12px; }
+  /* Session details */
+  dialog.wide { max-width: 680px; width: min(94vw, 680px); }
+  #infoDlg .dlg-head .sub { margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; }
+  #infoTitle { word-break: break-word; }
+  .facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; font-size: 13px; margin: 6px 0 4px;
+    padding: 12px 14px; border-radius: 12px; background: var(--card2); border: 1px solid var(--line2); }
+  .facts dt { color: var(--muted); }
+  .facts dd { margin: 0; min-width: 0; word-break: break-all; display: flex; gap: 6px; align-items: center; }
+  .facts .iconbtn { width: 24px; height: 24px; flex: none; }
+  .sect { font-size: 12px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); margin: 16px 0 8px; }
+  .msgs { display: flex; flex-direction: column; gap: 10px; padding-bottom: 6px; }
+  .msg { display: grid; grid-template-columns: 28px 1fr; gap: 10px; align-items: start; }
+  .msg .av { width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center;
+    font-size: 12px; font-weight: 800; color: #fff; background: #64748b; }
+  .msg.user .av { background: linear-gradient(135deg, var(--accent), var(--accent2)); }
+  .msg .bubble { min-width: 0; padding: 9px 12px; border-radius: 4px 12px 12px 12px; cursor: pointer;
+    background: var(--card); border: 1px solid var(--line); }
+  .msg.user .bubble { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+  .msg .who { display: flex; gap: 8px; align-items: baseline; font-size: 12px; font-weight: 700; color: var(--ink); margin-bottom: 3px; }
+  .msg .who time { font-weight: 500; color: var(--faint); font-size: 11.5px; }
+  .msg .txt { font-size: 13px; line-height: 1.5; color: var(--ink); white-space: pre-wrap; word-break: break-word;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
+  .msg.open .txt { display: block; }
+  .msg .more { font-size: 11.5px; color: var(--accent); margin-top: 2px; display: none; }
+  .msg.clipped .more { display: block; }
+  .pushlist { list-style: none; padding: 0; margin: 8px 0; }
   .pushlist li { padding: 9px 12px; border-radius: 10px; background: var(--card2);
     border: 1px solid var(--line2); margin-bottom: 6px; }
   .pushlist li .ttl { font-weight: 600; font-size: 13.5px; }
@@ -243,73 +508,127 @@
 
 <!-- ===== Lock / setup ===== -->
 <div id="lock" class="lockwrap hidden">
-  <div class="lockcard">
-    <div class="logo">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M4 12a8 8 0 0 1 13.7-5.6L20 8"/><path d="M20 4v4h-4"/>
-        <path d="M20 12a8 8 0 0 1-13.7 5.6L4 16"/><path d="M4 20v-4h4"/>
-      </svg>
+  <aside class="hero">
+    <div class="brand">
+      <div class="logo">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 12a8 8 0 0 1 13.7-5.6L20 8"/><path d="M20 4v4h-4"/>
+          <path d="M20 12a8 8 0 0 1-13.7 5.6L4 16"/><path d="M4 20v-4h4"/>
+        </svg>
+      </div>
+      <span class="wordmark">ccsync</span>
     </div>
+    <h1>Your Claude Code sessions, <em>on every machine.</em></h1>
+    <p class="lead">Pick up a conversation where you left it — on your laptop, your desktop or at work.</p>
+    <svg class="syncart" viewBox="0 0 440 120" fill="none" aria-hidden="true">
+      <g stroke="rgba(255,255,255,.85)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="16" y="30" width="92" height="58" rx="8" fill="rgba(255,255,255,.08)"/>
+        <path d="M6 96h112"/><path d="M34 48h40M34 60h56M34 72h30" stroke="rgba(255,255,255,.5)"/>
+        <rect x="332" y="30" width="92" height="58" rx="8" fill="rgba(255,255,255,.08)"/>
+        <path d="M322 96h112"/><path d="M350 48h40M350 60h56M350 72h30" stroke="rgba(255,255,255,.5)"/>
+        <circle cx="220" cy="60" r="34" fill="rgba(255,255,255,.12)"/>
+        <rect x="206" y="58" width="28" height="22" rx="4" fill="rgba(255,255,255,.9)" stroke="none"/>
+        <path d="M211 58v-6a9 9 0 0 1 18 0v6"/>
+      </g>
+      <path class="flow" d="M120 52H182" stroke="#f9a8d4" stroke-width="2.5" stroke-linecap="round"/>
+      <path class="flow rev" d="M120 68H182" stroke="#7dd3fc" stroke-width="2.5" stroke-linecap="round"/>
+      <path class="flow" d="M258 52H320" stroke="#f9a8d4" stroke-width="2.5" stroke-linecap="round"/>
+      <path class="flow rev" d="M258 68H320" stroke="#7dd3fc" stroke-width="2.5" stroke-linecap="round"/>
+    </svg>
+    <ul class="feats">
+      <li><span class="i"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span>
+        <div><b>End-to-end encrypted</b><small>Sessions are sealed with your passphrase before they leave this machine.</small></div></li>
+      <li><span class="i"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span>
+        <div><b>Storage you own</b><small>A private git repo or a folder your sync service already shares.</small></div></li>
+      <li><span class="i"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="m9 12 2 2 4-4"/></svg></span>
+        <div><b>Never loses a message</b><small>An older copy can’t overwrite a newer one; conflicts are shown, not merged away.</small></div></li>
+    </ul>
+  </aside>
+
+  <main class="lockpane">
+    <button class="themebtn" onclick="toggleTheme()" aria-label="Switch light or dark theme" title="Light / dark"><svg class="sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><svg class="moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+  <div class="lockcard">
+    <div id="unlockBox" class="hidden">
+      <h2 class="big">Welcome back</h2>
+      <p class="note">Choose a store and unlock it with its passphrase.</p>
+      <div id="storePick" class="picks" role="radiogroup" aria-label="Store"></div>
+      <button class="addtile" style="margin-top:8px" onclick="showSetup(true)">
+        <span class="kicon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
+        <span><b>Add a store</b><small>Another repo or synced folder, or one another machine made</small></span>
+      </button>
+      <label for="unlockPass">Passphrase</label>
+      <div class="pw">
+        <input id="unlockPass" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doUnlock()">
+        <button type="button" class="eye" onclick="togglePw(this)" aria-label="Show passphrase">Show</button>
+      </div>
+      <div id="unlockErr" class="alert hidden" role="alert"></div>
+      <button class="btn block" id="unlockGo" onclick="doUnlock()">
+        <span id="unlockSpin" class="spin hidden"></span><span id="unlockLbl">Unlock</span>
+      </button>
+      <div class="lock-links">
+        <button class="linkbtn subtle" onclick="forgetStore()">Forgot the passphrase?</button>
+      </div>
+    </div>
+
     <div id="setupBox" class="hidden">
-      <h1>Set up a store</h1>
-      <p class="note">Your sessions are encrypted with a passphrase before they leave this machine.
-        Every machine you set up with the same store and passphrase can push and pull them.</p>
-      <label>Where to keep it</label>
-      <div class="seg" role="radiogroup">
-        <label><input type="radio" name="kind" value="github" onchange="setupKind()"> New private GitHub repo</label>
-        <label><input type="radio" name="kind" value="git" onchange="setupKind()"> Existing git repo</label>
-        <label><input type="radio" name="kind" value="folder" onchange="setupKind()"> Synced folder</label>
+      <button class="linkbtn backlink hidden" id="setupBack" onclick="showUnlock()">← Back to my stores</button>
+      <h2 class="big">Set up a store</h2>
+      <p class="note">Sessions are encrypted with your passphrase before they leave this machine. Set up
+        every machine with the <b>same store and passphrase</b> to share them.</p>
+      <div class="kinds" role="radiogroup" aria-label="Where to keep the store">
+        <label class="pick"><input type="radio" name="kind" value="github" onchange="setupKind()">
+          <span class="kicon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span>
+          <span class="ptxt"><b>GitHub</b><small id="ghHint">New private repo, made with gh</small></span></label>
+        <label class="pick"><input type="radio" name="kind" value="git" onchange="setupKind()">
+          <span class="kicon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7M18 10.5c0 4-6 3-11 5.5"/></svg></span>
+          <span class="ptxt"><b>Git repo</b><small>An existing remote you can push to</small></span></label>
+        <label class="pick"><input type="radio" name="kind" value="folder" onchange="setupKind()">
+          <span class="kicon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span>
+          <span class="ptxt"><b>Synced folder</b><small>Dropbox, iCloud, Drive, Syncthing…</small></span></label>
       </div>
       <div id="kindGithub" class="kindbox">
-        <p class="note">Created through your GitHub CLI login (<span class="mono">gh</span>), always private.</p>
-        <label>Repository name</label>
+        <label for="ghName">Repository name</label>
         <input id="ghName" type="text" placeholder="claude-sessions" autocomplete="off"
           oninput="if(!nameEdited) storeName.value = nameFromUrl(this.value)">
+        <p class="note">Created as a <b>private</b> repo under the account <span class="mono">gh</span> is logged in to.</p>
       </div>
       <div id="kindGit" class="kindbox">
-        <p class="note">An empty repo (or one with just a README), ideally <b>private</b>. Your existing git
-          login is used — the GitHub CLI, a credential helper or an SSH key; ccsync never stores credentials.</p>
-        <label>Repository URL</label>
-        <input id="repoUrl" type="text" placeholder="https://github.com/you/claude-sessions.git" autocomplete="off"
+        <label for="repoUrl">Repository URL</label>
+        <input id="repoUrl" type="text" class="mono" placeholder="https://github.com/you/claude-sessions.git" autocomplete="off"
           oninput="if(!nameEdited) storeName.value = nameFromUrl(this.value)">
+        <p class="note">An empty repo (or one with just a README), ideally <b>private</b>. Your existing git login
+          is used — ccsync never stores credentials.</p>
       </div>
       <div id="kindFolder" class="kindbox">
-        <p class="note">A folder that Dropbox, iCloud Drive, Google Drive, OneDrive or Syncthing keeps in sync
-          between your machines — no git needed. Pick an empty folder, or the store folder another machine made.</p>
-        <label>Folder</label>
-        <input id="folderPath" type="text" placeholder="~/Dropbox/claude-sessions" autocomplete="off"
+        <label for="folderPath">Folder</label>
+        <input id="folderPath" type="text" class="mono" placeholder="~/Dropbox/claude-sessions" autocomplete="off"
           oninput="if(!nameEdited) storeName.value = nameFromUrl(this.value)">
+        <p class="note">An empty folder your sync service shares between machines — or the store folder another
+          machine already made.</p>
       </div>
-      <label>Name for this store <span class="muted">(on this machine, e.g. work or personal)</span></label>
+      <label for="storeName">Name on this machine <span class="muted">(e.g. work, personal)</span></label>
       <input id="storeName" type="text" placeholder="default" autocomplete="off" oninput="nameEdited = true">
-      <label>Store passphrase</label>
-      <input id="setupPass" type="password" autocomplete="new-password">
-      <label>Confirm passphrase</label>
-      <input id="setupPass2" type="password" autocomplete="new-password">
-      <div class="dlg-foot" style="padding:18px 0 0">
-        <button class="btn" id="setupGo" onclick="doSetup()">Set up</button>
-        <span id="setupSpin" class="spin hidden"></span>
-        <span style="flex:1"></span>
-        <button class="linkbtn hidden" id="setupBack" onclick="showUnlock()">Back to my stores</button>
+      <div class="cols">
+        <div>
+          <label for="setupPass">Passphrase</label>
+          <div class="pw">
+            <input id="setupPass" type="password" autocomplete="new-password">
+            <button type="button" class="eye" onclick="togglePw(this)" aria-label="Show passphrase">Show</button>
+          </div>
+        </div>
+        <div>
+          <label for="setupPass2">Confirm passphrase</label>
+          <input id="setupPass2" type="password" autocomplete="new-password" onkeydown="if(event.key==='Enter')doSetup()">
+        </div>
       </div>
-    </div>
-    <div id="unlockBox" class="hidden">
-      <h1>Unlock a store</h1>
-      <label>Store</label>
-      <select id="unlockStore" onchange="showLockRepo()"></select>
-      <p class="note" style="margin-top:6px"><span id="lockRepo" class="mono"></span></p>
-      <label>Store passphrase</label>
-      <input id="unlockPass" type="password" onkeydown="if(event.key==='Enter')doUnlock()">
-      <div class="dlg-foot" style="padding:18px 0 0">
-        <button class="btn" id="unlockGo" onclick="doUnlock()">Unlock</button>
-        <span id="unlockSpin" class="spin hidden"></span>
-      </div>
-      <div class="lock-links">
-        <button class="linkbtn" onclick="showSetup(true)">+ Add or create another store</button>
-        <button class="linkbtn" onclick="forgetStore()">Forgot the passphrase?</button>
-      </div>
+      <p class="note" style="margin-top:8px">There is no way to recover a forgotten passphrase — keep it in your password manager.</p>
+      <div id="setupErr" class="alert hidden" role="alert"></div>
+      <button class="btn block" id="setupGo" onclick="doSetup()">
+        <span id="setupSpin" class="spin hidden"></span><span id="setupLbl">Set up store</span>
+      </button>
     </div>
   </div>
+  </main>
 </div>
 
 <!-- ===== Main ===== -->
@@ -317,17 +636,21 @@
   <div class="appbar">
     <div class="brand">
       <div class="logo">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
           <path d="M4 12a8 8 0 0 1 13.7-5.6L20 8"/><path d="M20 4v4h-4"/>
           <path d="M20 12a8 8 0 0 1-13.7 5.6L4 16"/><path d="M4 20v-4h4"/>
         </svg>
       </div>
-      <div><b>ccsync</b><span>Claude Code sessions</span></div>
+      <span class="wordmark">ccsync</span>
+      <span class="tagline">Claude Code sessions,<br>synced &amp; encrypted</span>
     </div>
     <div class="spacer"></div>
-    <div class="chip" title="the open store"><span class="dot"></span><b id="storeName2"></b>
-      <span class="repo mono" id="storeRepo"></span></div>
-    <button class="btn ghost sm" onclick="switchStore()">Switch store</button>
+    <button class="storebtn" id="switchBtn" onclick="switchStore()" title="Switch to another store">
+      <span class="kicon" id="storeKind" aria-hidden="true"></span>
+      <span class="txt"><small>Store</small><b class="ell" id="storeName2"></b></span>
+      <span class="swap"><span id="switchIcon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4 3 8l4 4"/><path d="M3 8h14"/><path d="m17 20 4-4-4-4"/><path d="M21 16H7"/></svg></span><span id="switchLbl">Switch</span></span>
+    </button>
+    <button class="themebtn" onclick="toggleTheme()" aria-label="Switch light or dark theme" title="Light / dark"><svg class="sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><svg class="moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
   </div>
 
   <div class="wrap">
@@ -336,9 +659,16 @@
       <div class="card">
         <div class="card-head">
           <div class="titlerow">
-            <h2>This machine <span class="count" id="localCount"></span></h2>
+            <h2><span class="hicon" aria-hidden="true"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/></svg></span>This machine <span class="count" id="localCount"></span></h2>
+            <span class="summary" id="localSummary"></span>
+            <button class="btn ghost sm" id="localRefreshBtn" onclick="refreshLocal()">
+              <span id="localRefreshSpin" class="spin hidden"></span><span id="localRefreshLbl">Refresh</span>
+            </button>
           </div>
-          <select id="projectSel" onchange="loadLocal()"></select>
+          <div class="selbox">
+            <span class="kind" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span>
+            <select id="projectSel" onchange="loadLocal()" aria-label="Project"></select>
+          </div>
           <div class="search">
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
             <input id="localSearch" type="text" placeholder="Search sessions…" oninput="renderLocal()">
@@ -358,11 +688,18 @@
       <div class="card">
         <div class="card-head">
           <div class="titlerow">
-            <h2>In the store <span class="count" id="storeCount"></span></h2>
-            <span class="grow" style="flex:1"></span>
+            <h2><span class="hicon alt" aria-hidden="true"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 1 0-1.4-8.8A6 6 0 0 0 4.5 12 3.5 3.5 0 0 0 6 19z"/></svg></span>In the store <span class="count" id="storeCount"></span></h2>
+            <span class="summary" id="storeSummary"></span>
             <button class="btn ghost sm" id="refreshBtn" onclick="loadStore()">
               <span id="refreshSpin" class="spin hidden"></span><span id="refreshLbl">Refresh</span>
             </button>
+          </div>
+          <div class="locbar">
+            <span class="kind" id="storeKind2" aria-hidden="true"></span>
+            <span class="where mono ell" id="storeRepo"></span>
+            <button class="iconbtn" onclick="copyLocation()" title="Copy" aria-label="Copy the store location"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button>
+            <button class="iconbtn" id="compactBtn" onclick="compactStore()" title="Compact history — free the space old versions take" aria-label="Compact the store’s history"><span id="compactIcon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg></span></button>
+            <button class="iconbtn" id="openStoreBtn" onclick="openStore()" title="Open" aria-label="Open the store"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg></button>
           </div>
           <div class="search">
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
@@ -371,6 +708,7 @@
           <div class="toolbar">
             <label class="selall"><input type="checkbox" id="storePickAll" onchange="toggleStoreAll(this)"> Select all</label>
             <span class="grow"></span>
+            <button class="btn ghost danger" id="removeManyBtn" onclick="removeSelected()" disabled>Delete</button>
             <button class="btn" id="pullManyBtn" onclick="openPullMany()" disabled>Pull selected</button>
           </div>
         </div>
@@ -387,23 +725,36 @@
   <div class="dlg-head"><h2>Push these sessions?</h2>
     <p class="note" id="pushDlgSub" style="margin-top:6px"></p></div>
   <div class="dlg-body"><ul id="pushList" class="pushlist"></ul></div>
+  <div class="dlg-status"><div id="pushProg" class="prog hidden" aria-live="polite"><div class="prog-top"><span class="prog-step"></span><span class="prog-count"></span></div><div class="prog-track"><div class="prog-bar"></div></div></div></div>
   <div class="dlg-foot">
-    <button class="btn" id="pushGo" onclick="confirmPush()">
+    <button class="btn ghost" id="pushCancel" onclick="pushDlg.close()">Cancel</button>
+    <button class="btn" id="pushGo" onclick="confirmPush()" autofocus>
       <span id="pushSpin" class="spin hidden"></span><span id="pushGoLbl">Push</span>
     </button>
-    <button class="btn ghost" onclick="pushDlg.close()">Cancel</button>
-    <span class="grow" style="flex:1"></span>
-    <span id="pushStatus" class="note"></span>
   </div>
 </dialog>
 
 <!-- ===== Confirm dialog (askConfirm) ===== -->
 <dialog id="askDlg">
-  <div class="dlg-head"><h2 id="askTitle"></h2></div>
+  <div class="dlg-head ask"><span class="dlg-icon hidden" id="askIcon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17h.01"/></svg></span><h2 id="askTitle"></h2></div>
   <div class="dlg-body"><div id="askBody" class="note"></div></div>
   <div class="dlg-foot">
-    <button class="btn" id="askOk"></button>
     <button class="btn ghost" id="askCancel">Cancel</button>
+    <button class="btn" id="askOk"></button>
+  </div>
+</dialog>
+
+<!-- ===== Session details ===== -->
+<dialog id="infoDlg" class="wide">
+  <div class="dlg-head"><h2 id="infoTitle"></h2><div class="sub" id="infoSub"></div></div>
+  <div class="dlg-body">
+    <dl class="facts" id="infoFacts"></dl>
+    <h3 class="sect">Last messages</h3>
+    <div id="infoMsgs" class="msgs"></div>
+  </div>
+  <div class="dlg-foot">
+    <button class="btn ghost" onclick="infoDlg.close()">Close</button>
+    <button class="btn hidden" id="infoPull">Pull…</button>
   </div>
 </dialog>
 
@@ -416,13 +767,14 @@
     <input id="pullDest" type="text" class="mono">
     <label class="selall" style="margin-top:12px">
       <input type="checkbox" id="pullForce"> replace a local copy that is newer or was continued here (it is kept as a .bak file)</label>
-    <div id="pullDone" class="donebox hidden"></div>
   </div>
+  <div class="dlg-status"><div id="pullProg" class="prog hidden" aria-live="polite"><div class="prog-top"><span class="prog-step"></span><span class="prog-count"></span></div><div class="prog-track"><div class="prog-bar"></div></div></div>
+    <div id="pullDone" class="donebox hidden"></div></div>
   <div class="dlg-foot">
+    <button class="btn ghost" id="pullClose" onclick="pullDlg.close()">Close</button>
     <button class="btn" id="pullGo" onclick="doPull()">
       <span id="pullSpin" class="spin hidden"></span><span id="pullGoLbl">Pull</span>
     </button>
-    <button class="btn ghost" onclick="pullDlg.close()">Close</button>
   </div>
 </dialog>
 
@@ -440,19 +792,27 @@
     <ul id="pmPlan" class="pushlist"></ul>
     <label class="selall" style="margin-top:12px">
       <input type="checkbox" id="pmForce"> replace local copies that are newer or were continued here (kept as .bak files)</label>
-    <div id="pmDone" class="donebox hidden"></div>
   </div>
+  <div class="dlg-status"><div id="pmProg" class="prog hidden" aria-live="polite"><div class="prog-top"><span class="prog-step"></span><span class="prog-count"></span></div><div class="prog-track"><div class="prog-bar"></div></div></div>
+    <div id="pmDone" class="donebox hidden"></div></div>
   <div class="dlg-foot">
-    <button class="btn" id="pmGo" onclick="doPullMany()">
+    <button class="btn ghost" id="pmClose" onclick="pullManyDlg.close(); loadStore()">Close</button>
+    <button class="btn" id="pmGo" onclick="doPullMany()" autofocus>
       <span id="pmSpin" class="spin hidden"></span><span id="pmGoLbl">Pull</span>
     </button>
-    <button class="btn ghost" onclick="pullManyDlg.close(); loadStore()">Close</button>
   </div>
 </dialog>
 
 <div id="toast"></div>
 
 <script>
+// Keyboard or pointer: decides whether focus rings show (see html.kbd).
+addEventListener('keydown', e => {
+  if (['Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key))
+    document.documentElement.classList.add('kbd');
+}, true);
+addEventListener('pointerdown', () => document.documentElement.classList.remove('kbd'), true);
+
 // The URL carries a one-time code, exchanged here for the API token. The
 // token is kept for this tab only and never appears in a URL.
 let token = sessionStorage.getItem('ccsync-token') || '';
@@ -468,8 +828,8 @@ async function obtainToken() {
 }
 let state = null, pullTarget = null, localRows = [], storeMetas = [], projectsBySlug = {};
 
-async function api(path, body) {
-  const opts = { headers: { 'X-CCSync-Token': token } };
+async function api(path, body, signal) {
+  const opts = { headers: { 'X-CCSync-Token': token }, signal };
   if (body !== undefined) {
     opts.method = 'POST';
     opts.headers['Content-Type'] = 'application/json';
@@ -491,12 +851,14 @@ function askConfirm(title, bodyHtml, okLabel, danger = false) {
   const ok = document.getElementById('askOk');
   ok.textContent = okLabel;
   ok.classList.toggle('danger-solid', danger);
+  document.getElementById('askIcon').classList.toggle('hidden', !danger);
   return new Promise(resolve => {
     const done = v => { dlg.close(); resolve(v); };
     ok.onclick = () => done(true);
     document.getElementById('askCancel').onclick = () => done(false);
     dlg.oncancel = () => resolve(false); // Esc
     dlg.showModal();
+    (danger ? document.getElementById('askCancel') : ok).focus(); // a destructive action is never the default
   });
 }
 
@@ -513,11 +875,76 @@ function busy(btnId, spinId, on, lblId, busyText, idleText) {
   if (lblId) document.getElementById(lblId).textContent = on ? busyText : idleText;
 }
 
+// trackProgress shows the server's progress in the .prog box `id` until the
+// returned stop function is called. While it runs, closeId's button is
+// disabled and Esc can't close dialog dlgId: closing would not stop the
+// operation, only hide it.
+function trackProgress(id, dlgId, closeId) {
+  const box = document.getElementById(id);
+  const step = box.querySelector('.prog-step'), count = box.querySelector('.prog-count');
+  const bar = box.querySelector('.prog-bar');
+  const dlg = document.getElementById(dlgId), close = document.getElementById(closeId);
+  const show = p => {
+    step.textContent = p.step + '…';
+    const counted = p.total > 0;
+    count.textContent = counted ? `${Math.min(p.done + 1, p.total)} of ${p.total}` : '';
+    bar.classList.toggle('indet', !counted);
+    bar.style.width = counted ? `${Math.max(4, 100 * p.done / p.total)}%` : '';
+  };
+  let stopped = false, timer = null;
+  const poll = async () => {
+    try { const p = await api('/api/progress'); if (!stopped && p.step) show(p); } catch {}
+    if (!stopped) timer = setTimeout(poll, 300);
+  };
+  show({ step: 'Starting', done: 0, total: 0 });
+  box.classList.remove('hidden');
+  close.disabled = true;
+  dlg.oncancel = e => e.preventDefault();
+  timer = setTimeout(poll, 150);
+  return () => {
+    stopped = true;
+    clearTimeout(timer);
+    box.classList.add('hidden');
+    close.disabled = false;
+    dlg.oncancel = null;
+  };
+}
+
+function loadingHTML(text) {
+  return `<div class="loading"><span class="spin"></span>${esc(text)}</div>`;
+}
+
+function toggleTheme() {
+  const root = document.documentElement;
+  const dark = root.dataset.theme ? root.dataset.theme === 'dark'
+    : matchMedia('(prefers-color-scheme: dark)').matches;
+  root.dataset.theme = dark ? 'light' : 'dark';
+  try { localStorage.setItem('ccsync-theme', root.dataset.theme); } catch {}
+}
+
+function togglePw(btn) {
+  const inp = btn.previousElementSibling, shown = inp.type === 'text';
+  inp.type = shown ? 'password' : 'text';
+  btn.textContent = shown ? 'Show' : 'Hide';
+  btn.setAttribute('aria-label', (shown ? 'Show' : 'Hide') + ' passphrase');
+}
+
+function lockError(id, msg) {
+  const el = document.getElementById(id);
+  el.textContent = msg || '';
+  el.classList.toggle('hidden', !msg);
+}
+
+const KIND_ICON = {
+  git: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7M18 10.5c0 4-6 3-11 5.5"/></svg>',
+  folder: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
+};
+
 const esc = s => (s || '').replace(/[&<>"']/g, c =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const when = iso => iso ? new Date(iso).toLocaleString(undefined,
   { dateStyle: 'medium', timeStyle: 'short' }) : '';
-const size = n => n >= 1<<20 ? (n/(1<<20)).toFixed(1)+' MB'
+const size = n => n >= 1<<30 ? (n/(1<<30)).toFixed(1)+' GB' : n >= 1<<20 ? (n/(1<<20)).toFixed(1)+' MB'
   : n >= 1024 ? (n/1024).toFixed(1)+' KB' : n+' B';
 const short = id => (id || '').slice(0, 8);
 
@@ -548,39 +975,50 @@ function showSetup(canGoBack) {
   hideLock();
   nameEdited = false;
   ['ghName', 'repoUrl', 'folderPath', 'storeName', 'setupPass', 'setupPass2'].forEach(id => document.getElementById(id).value = '');
+  lockError('setupErr', '');
+  // Creating a GitHub repo needs a logged-in GitHub CLI.
+  document.querySelector('input[name=kind][value=github]').disabled = !state.github;
+  document.getElementById('ghHint').textContent = state.github
+    ? 'New private repo, made with gh' : 'Needs the GitHub CLI (gh auth login)';
   document.querySelector(`input[name=kind][value=${state.github ? 'github' : 'git'}]`).checked = true;
-  setupKind();
   document.getElementById('setupBack').classList.toggle('hidden', !canGoBack);
   document.getElementById('lock').classList.remove('hidden');
   document.getElementById('setupBox').classList.remove('hidden');
-
+  setupKind();
 }
 
 function showUnlock() {
   hideLock();
-  const sel = document.getElementById('unlockStore');
-  sel.innerHTML = state.stores.map(st =>
-    `<option value="${esc(st.name)}">${esc(st.name)}</option>`).join('');
-  sel.value = state.current || state.stores[0].name;
-  showLockRepo();
+  const current = state.current || state.stores[0].name;
+  const box = document.getElementById('storePick');
+  box.innerHTML = state.stores.map(st => `
+    <label class="pick" title="${esc(st.location)}">
+      <input type="radio" name="store" value="${esc(st.name)}"${st.name === current ? ' checked' : ''}>
+      <span class="kicon" aria-hidden="true">${KIND_ICON[st.kind] || KIND_ICON.git}</span>
+      <span class="ptxt"><b class="ell">${esc(st.name)}</b><small class="ell mono">${esc(st.location)}</small></span>
+      <span class="tick" aria-hidden="true"></span>
+    </label>`).join('');
+  box.querySelectorAll('input').forEach(r => r.addEventListener('change', () => {
+    lockError('unlockErr', '');
+    document.getElementById('unlockPass').focus();
+  }));
   document.getElementById('unlockPass').value = '';
+  lockError('unlockErr', '');
   document.getElementById('lock').classList.remove('hidden');
   document.getElementById('unlockBox').classList.remove('hidden');
   document.getElementById('unlockPass').focus();
 }
 
-function showLockRepo() {
-  const name = document.getElementById('unlockStore').value;
-  const st = state.stores.find(x => x.name === name);
-  document.getElementById('lockRepo').textContent = st ? st.location : '';
+function pickedStore() {
+  const r = document.querySelector('#storePick input:checked');
+  return r ? r.value : '';
 }
 
 function setupKind() {
   const kind = document.querySelector('input[name=kind]:checked').value;
   for (const [k, id] of [['github', 'kindGithub'], ['git', 'kindGit'], ['folder', 'kindFolder']])
     document.getElementById(id).classList.toggle('hidden', k !== kind);
-  // Creating a GitHub repo needs a logged-in GitHub CLI.
-  document.querySelector('input[name=kind][value=github]').disabled = !state.github;
+  lockError('setupErr', '');
   document.getElementById({ github: 'ghName', git: 'repoUrl', folder: 'folderPath' }[kind]).focus();
 }
 
@@ -590,32 +1028,40 @@ async function doSetup() {
   const name = document.getElementById('storeName').value.trim() || nameFromUrl(where);
   const p1 = document.getElementById('setupPass').value;
   const p2 = document.getElementById('setupPass2').value;
-  if (!where || !p1) return toast('where to keep the store and a passphrase are required', true);
-  if (p1 !== p2) return toast('passphrases do not match', true);
+  const missing = !where ? { github: 'Enter a repository name.', git: 'Enter the repository URL.',
+    folder: 'Enter the folder.' }[kind] : !p1 ? 'Choose a passphrase.' : '';
+  if (missing) return lockError('setupErr', missing);
+  if (p1 !== p2) return lockError('setupErr', 'The passphrases don’t match.');
+  lockError('setupErr', '');
   const req = { name, passphrase: p1, kind: kind === 'folder' ? 'folder' : 'git' };
   if (kind === 'github') req.createGitHub = where; else req.location = where;
-  busy('setupGo', 'setupSpin', true);
+  busy('setupGo', 'setupSpin', true, 'setupLbl', kind === 'folder' ? 'Setting up…' : 'Setting up — this can take a moment…', 'Set up store');
   try {
     await api('/api/setup', req);
     await boot();
-  } catch (e) { toast(e.message, true); }
-  busy('setupGo', 'setupSpin', false);
+  } catch (e) { lockError('setupErr', e.message); }
+  busy('setupGo', 'setupSpin', false, 'setupLbl', '', 'Set up store');
 }
 
 async function doUnlock() {
-  busy('unlockGo', 'unlockSpin', true);
+  if (!document.getElementById('unlockPass').value) return lockError('unlockErr', 'Enter the passphrase.');
+  lockError('unlockErr', '');
+  busy('unlockGo', 'unlockSpin', true, 'unlockLbl', 'Unlocking…', 'Unlock');
   try {
     await api('/api/unlock', {
-      store: document.getElementById('unlockStore').value,
+      store: pickedStore(),
       passphrase: document.getElementById('unlockPass').value,
     });
     await boot();
-  } catch (e) { toast(e.message, true); }
-  busy('unlockGo', 'unlockSpin', false);
+  } catch (e) {
+    lockError('unlockErr', e.message);
+    document.getElementById('unlockPass').select();
+  }
+  busy('unlockGo', 'unlockSpin', false, 'unlockLbl', '', 'Unlock');
 }
 
 async function forgetStore() {
-  const name = document.getElementById('unlockStore').value;
+  const name = pickedStore();
   const yes = await askConfirm(`Forget “${name}” on this machine?`,
     'A forgotten passphrase can’t be recovered — that is what end-to-end encryption means. ' +
     'What you can do is remove this store from this machine and set up a new one:' +
@@ -632,48 +1078,217 @@ async function forgetStore() {
 }
 
 async function switchStore() {
+  // Waits for the operation in progress; a status check is abandoned.
+  const btn = document.getElementById('switchBtn'), icon = document.getElementById('switchIcon');
+  const idle = icon.innerHTML;
+  btn.disabled = true;
+  icon.innerHTML = '<span class="spin"></span>';
+  document.getElementById('switchLbl').textContent = 'Switching…';
+  if (statusCtl) statusCtl.abort();
   try {
     await api('/api/lock', {});
     await boot();
   } catch (e) { toast(e.message, true); }
+  btn.disabled = false;
+  icon.innerHTML = idle;
+  document.getElementById('switchLbl').textContent = 'Switch';
+}
+
+async function copyLocation() { copyText(state.store.location); }
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); }
+  catch { // some embedded web views have no async clipboard
+    const t = Object.assign(document.createElement('textarea'), { value: text });
+    document.body.append(t); t.select(); document.execCommand('copy'); t.remove();
+  }
+  toast('Copied');
+}
+
+async function compactStore() {
+  let h = null;
+  try { h = await api('/api/history'); } catch {}
+  const now = h ? `<p class="histnow${h.bytes >= 500 << 20 ? ' big' : ''}">Now: <b>${h.commits} commit(s)</b>, ` +
+    `<b>${size(h.bytes)}</b> of history` + (h.bytes >= 500 << 20 ? ' — GitHub recommends repos under 1 GB.' : '.') + '</p>' : '';
+  const yes = await askConfirm('Compact the store’s history?', now +
+    '<p>Every overwrite and delete leaves the old version in the store repo’s git history, so the repo ' +
+    'only grows. Compacting rewrites that history as one commit of what the store holds now.</p>' +
+    '<div class="kl"><div class="keep"><h4>Kept</h4><ul><li>Every session in the store</li>' +
+    '<li>Sessions on your machines</li><li>Other machines — they follow on their own</li></ul></div>' +
+    '<div class="lose"><h4>Gone for good</h4><ul><li>Versions you overwrote</li>' +
+    '<li>Sessions you deleted</li></ul></div></div>' +
+    '<p class="fine">The git host frees the space on its own schedule — sometimes only days later.</p>',
+    'Compact history', true);
+  if (!yes) return;
+  const btn = document.getElementById('compactBtn'), icon = document.getElementById('compactIcon');
+  const idle = icon.innerHTML;
+  btn.disabled = true;
+  icon.innerHTML = '<span class="spin"></span>';
+  try {
+    const r = await api('/api/compact', {});
+    toast(r.commits <= 1 ? 'The history is already a single commit'
+      : `Compacted ${r.commits} commits into 1 — this machine’s copy went from ${size(r.before)} to ${size(r.after)}`);
+  } catch (e) { toast(e.message, true); }
+  btn.disabled = false;
+  icon.innerHTML = idle;
+}
+
+async function openStore() {
+  try { await api('/api/open', {}); }
+  catch (e) { toast(e.message, true); }
 }
 
 function openMain() {
   selected.clear(); // a switch of store starts clean
+  storeMetas = []; storeIds = new Set(); storeLoaded = false; syncStatus = null; statusOk = false; onlyMissing = false;
   document.getElementById('main').classList.remove('hidden');
   document.getElementById('storeName2').textContent = state.store.name;
-  document.getElementById('storeRepo').textContent = state.store.location;
+  const repo = document.getElementById('storeRepo');
+  repo.textContent = state.store.location;
+  repo.title = state.store.location;
+  const icon = KIND_ICON[state.store.kind] || KIND_ICON.git;
+  document.getElementById('storeKind').innerHTML = icon;
+  document.getElementById('storeKind2').innerHTML = icon;
+  document.getElementById('compactBtn').classList.toggle('hidden', !isGitStore());
+  const open = document.getElementById('openStoreBtn');
+  open.classList.toggle('hidden', !state.store.link);
+  open.title = state.store.kind === 'folder' ? 'Open the folder' : 'Open in the browser';
+  document.getElementById('localList').innerHTML = loadingHTML('Loading sessions…');
+  document.getElementById('storeList').innerHTML = loadingHTML('Loading the store…');
   loadProjects().then(loadLocal);
   loadStore();
 }
 
+// refreshLocal rereads this machine's projects and sessions, and compares
+// them with the store again.
+async function refreshLocal() {
+  busy('localRefreshBtn', 'localRefreshSpin', true, 'localRefreshLbl', 'Refreshing…', 'Refresh');
+  await loadProjects();
+  await loadLocal();
+  if (storeLoaded) loadStatus();
+  busy('localRefreshBtn', 'localRefreshSpin', false, 'localRefreshLbl', 'Refreshing…', 'Refresh');
+}
+
 async function loadProjects() {
   const sel = document.getElementById('projectSel');
+  const keep = sel.value; // a refresh stays on the chosen project
   try {
     const projects = (await api('/api/projects'))
       .sort((a, b) => new Date(b.LastUsed) - new Date(a.LastUsed));
     projectsBySlug = Object.fromEntries(projects.map(p => [p.Slug, p]));
     const total = projects.reduce((n, p) => n + p.Sessions, 0);
-    sel.innerHTML = projects.map(p =>
-      `<option value="${esc(p.Slug)}">${esc(p.Path || p.Slug)}  ·  ${p.Sessions} session(s)</option>`).join('') +
-      (projects.length > 1 ? `<option value="*">All projects  ·  ${total} session(s)</option>` : '');
+    // All projects comes first and is where the list starts.
+    sel.innerHTML = (projects.length > 1 ? `<option value="*">All projects  ·  ${total} session(s)</option>` : '') +
+      projects.map(p =>
+        `<option value="${esc(p.Slug)}">${esc(p.Path || p.Slug)}  ·  ${p.Sessions} session(s)</option>`).join('');
+    if (keep && [...sel.options].some(o => o.value === keep)) sel.value = keep;
   } catch (e) { toast(e.message, true); }
 }
 
 const selected = new Set();           // session ids ticked for push (survives filtering & search)
 
+let localSeq = 0; // only the latest project choice may fill the list
+let localLoading = false;
+
+// ----- Sync status: how each copy relates to the other side -----
+
+let storeLoaded = false;  // storeMetas holds the store's listing
+let storeIds = new Set();
+let syncStatus = null;    // {id: relation} seen from this machine; null while checking
+let statusSeq = 0;
+let statusCtl = null;     // aborts the running status check
+
+// What a relation means on each side. Keys are app/session relations of
+// this machine's copy to the store copy.
+const LOCAL_REL = {
+  same:     ['ok',   'Synced',         'Same messages here and in the store'],
+  ahead:    ['acc',  'Ahead',          'Newer here: this machine has messages the store copy lacks — push it'],
+  behind:   ['warn', 'Behind',         'Newer in the store: the store copy has messages this machine lacks — pull it'],
+  diverged: ['err',  'Diverged',       'Continued both here and on another machine — pushing or pulling with overwrite keeps one side'],
+  unknown:  ['dim',  '?',              'Can’t compare: the copies have no comparable entries'],
+};
+const badge = ([cls, text, tip]) =>
+  `<span class="badge ${cls}" title="${esc(tip || '')}">${esc(text)}</span>`;
+const CHECKING = ['dim', 'Checking…', 'Comparing with the store'];
+
+// localState is a local session's sync state key, or '' while unknown.
+function localState(id) {
+  if (!storeLoaded) return '';
+  if (!storeIds.has(id)) return 'unpushed';
+  return syncStatus ? (syncStatus[id] || 'unknown') : '';
+}
+function localBadge(id) {
+  const st = localState(id);
+  if (st === 'unpushed') return badge(['acc', 'New', 'Not pushed: not in the store yet']);
+  return badge(st ? LOCAL_REL[st] : CHECKING);
+}
+// missingHere: a store session this machine doesn't have (known once the
+// status loaded, which covers every local session).
+let statusOk = false;  // syncStatus came from the server, not a failure
+const missingHere = id => statusOk && !(id in syncStatus);
+
+// summarize renders counts of the states worth acting on.
+function summarize(states, labels) {
+  const n = {};
+  states.forEach(st => { n[st] = (n[st] || 0) + 1; });
+  return labels.filter(([st]) => n[st]).map(([st, text]) => `<b>${n[st]}</b> ${text}`).join(' · ');
+}
+function renderSummaries() {
+  document.getElementById('localSummary').innerHTML = localLoading ? '' : summarize(
+    localRows.map(s => localState(s.ID)),
+    [['unpushed', 'new'], ['ahead', 'ahead'], ['behind', 'behind'], ['diverged', 'diverged']]);
+  const missing = storeMetas.filter(m => missingHere(m.session_id)).length;
+  if (statusOk && !missing) onlyMissing = false; // e.g. all deleted
+  document.getElementById('storeSummary').innerHTML = missing || onlyMissing
+    ? `<button class="filterchip${onlyMissing ? ' on' : ''}" onclick="toggleOnlyMissing()" aria-pressed="${onlyMissing}"
+        title="${onlyMissing ? 'Show every session' : 'Not on this machine — show only these, e.g. to delete them from the store'}">
+        <b>${missing}</b> not here${onlyMissing ? ' ✕' : ''}</button>` : '';
+}
+
+// loadStatus compares this machine's sessions with the store's (after the
+// store listing is fresh) and refreshes the badges.
+async function loadStatus() {
+  const seq = ++statusSeq;
+  syncStatus = null; statusOk = false;
+  renderLocal(); renderStore();
+  if (statusCtl) statusCtl.abort(); // a newer check supersedes it
+  const ctl = statusCtl = new AbortController();
+  try {
+    const st = await api('/api/status', undefined, ctl.signal);
+    if (seq !== statusSeq) return;
+    syncStatus = st; statusOk = true;
+  } catch (e) {
+    if (seq !== statusSeq || ctl.signal.aborted) return;
+    syncStatus = {};
+    toast('Couldn’t compare with the store: ' + e.message, true);
+  }
+  renderLocal(); renderStore();
+}
+
 async function loadLocal() {
   const slug = document.getElementById('projectSel').value;
   if (!slug) { localRows = []; renderLocal(); return; }
+  const seq = ++localSeq;
+  localLoading = true;
+  document.getElementById('localList').innerHTML = loadingHTML('Loading sessions…');
+  document.getElementById('localCount').textContent = '';
+  document.getElementById('pushBtn').disabled = true;
   try {
-    localRows = (await api('/api/local?slug=' + encodeURIComponent(slug)))
+    const rows = (await api('/api/local?slug=' + encodeURIComponent(slug)))
       .sort((a, b) => new Date(b.Mtime) - new Date(a.Mtime));
+    if (seq !== localSeq) return;
+    localLoading = false;
+    localRows = rows;
     // Drop selections that no longer exist in this project.
     const ids = new Set(localRows.map(s => s.ID));
     [...selected].forEach(id => { if (!ids.has(id)) selected.delete(id); });
-    document.getElementById('localCount').textContent = localRows.length ? `· ${localRows.length}` : '';
+    document.getElementById('localCount').textContent = localRows.length ? String(localRows.length) : '';
     renderLocal();
-  } catch (e) { toast(e.message, true); }
+  } catch (e) {
+    if (seq !== localSeq) return;
+    localLoading = false;
+    document.getElementById('localList').innerHTML = `<div class="empty">Couldn’t load sessions: ${esc(e.message)}</div>`;
+  }
 }
 
 function localVisible() {
@@ -685,6 +1300,8 @@ function localVisible() {
 }
 
 function renderLocal() {
+  if (localLoading) return;
+  renderSummaries();
   const list = document.getElementById('localList');
   const rows = localVisible();
   if (!localRows.length) {
@@ -696,12 +1313,18 @@ function renderLocal() {
       <div class="row pickrow${selected.has(s.ID) ? ' on' : ''}" data-id="${esc(s.ID)}" ${s.Active ? 'data-active="1"' : ''}>
         <div class="box"></div>
         <div class="main">
-          <div class="ttl"><span class="name">${esc(s.Title) || '<span class="muted">(untitled)</span>'}</span>
-            ${s.Active ? '<span class="badge active">active</span>' : ''}</div>
+          <div class="ttl"><span class="name" title="${esc(s.Title)}">${esc(s.Title) || '<span class="muted">(untitled)</span>'}</span>
+            ${s.Active ? '<span class="badge active">active</span>' : ''}${localBadge(s.ID)}</div>
           <div class="sub mono">${esc(short(s.ID))}${allProjectsMode() && s.Cwd ? ' · ' + esc(s.Cwd) : ''}</div>
         </div>
         <div class="side"><div class="t">${when(s.Mtime)}</div><div class="s">${size(s.Size)}</div></div>
+        <div class="acts"><button class="iconbtn" data-act="info" aria-label="Details and last messages" title="Details">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></button></div>
       </div>`).join('');
+    list.querySelectorAll('.pickrow [data-act="info"]').forEach(b => b.addEventListener('click', e => {
+      e.stopPropagation();
+      openInfo('local', localRows.find(s => s.ID === b.closest('.pickrow').dataset.id));
+    }));
     list.querySelectorAll('.pickrow').forEach(r => r.addEventListener('click', () => {
       const id = r.dataset.id;
       if (selected.has(id)) selected.delete(id); else selected.add(id);
@@ -729,20 +1352,28 @@ function toggleAll(box) {
   renderLocal();
 }
 
-function doPush() {
-  if (!selected.size) return;
-  const chosen = localRows.filter(s => selected.has(s.ID));
+// isGitStore: a git store keeps replaced and deleted versions in its
+// history; a synced folder does not.
+function isGitStore() { return !state.store || state.store.kind !== 'folder'; }
+
+function showPushDlg(chosen, overwrite) {
   const active = chosen.filter(s => s.Active).length;
   document.getElementById('pushList').innerHTML = chosen.map(s =>
     `<li><div class="ttl"><span class="name">${esc(s.Title) || '<span class="muted">(untitled)</span>'}</span>
       ${s.Active ? '<span class="badge active">active</span>' : ''}</div>
       <div class="mono">${esc(short(s.ID))}${s.Size ? ' · ' + size(s.Size) : ''}</div></li>`).join('');
-  document.getElementById('pushDlgSub').textContent =
-    `${chosen.length} session(s) will be encrypted and pushed to your store` +
-    (active ? ` — ${active} look active and will be forced.` : '.');
-  document.getElementById('pushStatus').textContent = '';
+  document.getElementById('pushDlgSub').textContent = overwrite
+    ? `Replacing the store copy of ${chosen.length} session(s) with yours.`
+    : `${chosen.length} session(s) will be encrypted and pushed to your store` +
+      (active ? ` — ${active} look active and will be forced.` : '.');
   busy('pushGo', 'pushSpin', false, 'pushGoLbl', 'Pushing…', 'Push');
-  document.getElementById('pushDlg').showModal();
+  const dlg = document.getElementById('pushDlg');
+  if (!dlg.open) dlg.showModal();
+}
+
+function doPush() {
+  if (!selected.size) return;
+  showPushDlg(localRows.filter(s => selected.has(s.ID)), false);
 }
 
 function allProjectsMode() { return document.getElementById('projectSel').value === '*'; }
@@ -750,14 +1381,16 @@ function allProjectsMode() { return document.getElementById('projectSel').value 
 async function confirmPush(overwrite = false, ids = null) {
   const chosen = localRows.filter(s => (ids ? ids.includes(s.ID) : selected.has(s.ID)));
   const includeActive = chosen.some(s => s.Active); // the dialog said they'd be included
+  if (overwrite) showPushDlg(chosen, true);
   busy('pushGo', 'pushSpin', true, 'pushGoLbl', 'Pushing…', 'Push');
-  document.getElementById('pushStatus').textContent = 'Encrypting & pushing…';
+  const stop = trackProgress('pushProg', 'pushDlg', 'pushCancel');
   try {
     const slug = document.getElementById('projectSel').value;
     const r = await api('/api/push', {
       slug, project: (projectsBySlug[slug] || {}).Path || '',
       ids: chosen.map(s => s.ID), includeActive, overwrite,
     });
+    stop();
     document.getElementById('pushDlg').close();
     selected.clear();
     toast(`Pushed ${r.pushed} session(s)` + (r.skipped ? `, ${r.skipped} already up to date` : '') +
@@ -775,12 +1408,14 @@ async function confirmPush(overwrite = false, ids = null) {
       busy('pushGo', 'pushSpin', false, 'pushGoLbl', 'Pushing…', 'Push');
       const yes = await askConfirm(`${r.rejected.length} session(s) not pushed`,
         `The store copy has messages yours lacks, so pushing would lose them:<ul class="pushlist">${items}</ul>` +
-        'Pull them instead, or overwrite the store copy with yours. The overwritten version stays in the store repo’s git history.',
+        'Pull them instead, or overwrite the store copy with yours. ' + (isGitStore()
+          ? 'The overwritten version stays in the store repo’s git history.'
+          : 'In a synced folder the overwritten version is gone for good.'),
         'Overwrite store copy', true);
       if (yes) return confirmPush(true, r.rejected.map(x => x.id));
     }
   } catch (e) {
-    document.getElementById('pushStatus').textContent = '';
+    stop();
     toast(e.message, true);
   }
   busy('pushGo', 'pushSpin', false, 'pushGoLbl', 'Pushing…', 'Push');
@@ -792,16 +1427,31 @@ async function loadStore() {
   try {
     storeMetas = (await api('/api/store'))
       .sort((a, b) => new Date(b.session_mtime) - new Date(a.session_mtime));
-    document.getElementById('storeCount').textContent = storeMetas.length ? `· ${storeMetas.length}` : '';
-    renderStore();
-  } catch (e) { toast(e.message, true); }
+    storeIds = new Set(storeMetas.map(m => m.session_id));
+    storeLoaded = true;
+    document.getElementById('storeCount').textContent = storeMetas.length ? String(storeMetas.length) : '';
+    loadStatus(); // renders both lists, then again with the badges
+  } catch (e) {
+    if (storeMetas.length) toast(e.message, true);
+    else document.getElementById('storeList').innerHTML = `<div class="empty">Couldn’t load the store: ${esc(e.message)}</div>`;
+  }
   busy('refreshBtn', 'refreshSpin', false, 'refreshLbl', 'Refreshing…', 'Refresh');
+}
+
+// onlyMissing filters the store list to sessions this machine doesn't have.
+let onlyMissing = false;
+function toggleOnlyMissing() {
+  onlyMissing = !onlyMissing;
+  // Never act on rows the filter hides: Delete must take only what's shown.
+  if (onlyMissing) [...storeSelected].forEach(id => { if (!missingHere(id)) storeSelected.delete(id); });
+  renderStore();
 }
 
 function storeVisible() {
   const q = document.getElementById('storeSearch').value.trim().toLowerCase();
-  if (!q) return storeMetas;
-  return storeMetas.filter(m =>
+  const metas = onlyMissing ? storeMetas.filter(m => missingHere(m.session_id)) : storeMetas;
+  if (!q) return metas;
+  return metas.filter(m =>
     (m.title || '').toLowerCase().includes(q) ||
     (m.project_label || '').toLowerCase().includes(q) ||
     (m.hostname || '').toLowerCase().includes(q) ||
@@ -809,6 +1459,8 @@ function storeVisible() {
 }
 
 function renderStore() {
+  if (!storeLoaded) return;
+  renderSummaries();
   const list = document.getElementById('storeList');
   const metas = storeVisible();
   if (!storeMetas.length) {
@@ -823,17 +1475,22 @@ function renderStore() {
     <div class="row store pickrow${storeSelected.has(m.session_id) ? ' on' : ''}" data-id="${esc(m.session_id)}">
       <div class="box"></div>
       <div class="main">
-        <div class="ttl"><span class="name">${esc(m.title) || '<span class="muted">(untitled)</span>'}</span></div>
+        <div class="ttl"><span class="name" title="${esc(m.title)}">${esc(m.title) || '<span class="muted">(untitled)</span>'}</span>${
+          missingHere(m.session_id) ? badge(['acc', 'Not here', 'Not on this machine: pull it to continue it here']) : ''}</div>
         <div class="sub"><span class="mono">${esc(short(m.session_id))}</span>
           · ${esc(m.project_label || '')} · from ${esc(m.hostname || '?')}</div>
       </div>
       <div class="side"><div class="t">${when(m.session_mtime)}</div><div class="s">${size(m.size)}</div></div>
-      <button class="btn ghost sm" data-act="pull">Pull</button>
-      <button class="btn ghost sm danger" data-act="remove" aria-label="Delete from store" title="Delete from store">Delete</button>
+      <div class="acts">
+        <button class="iconbtn" data-act="info" aria-label="Details and last messages" title="Details">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></button>
+        <button class="iconbtn danger" data-act="remove" aria-label="Delete from the store" title="Delete from the store">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg></button>
+      </div>
     </div>`).join('');
   list.querySelectorAll('.row.store').forEach(row => {
     const m = storeMetas.find(x => x.session_id === row.dataset.id);
-    row.querySelector('[data-act="pull"]').addEventListener('click', e => { e.stopPropagation(); openPull(m); });
+    row.querySelector('[data-act="info"]').addEventListener('click', e => { e.stopPropagation(); openInfo('store', m); });
     row.querySelector('[data-act="remove"]').addEventListener('click', e => { e.stopPropagation(); doRemove(m); });
     row.addEventListener('click', () => {
       if (storeSelected.has(m.session_id)) storeSelected.delete(m.session_id); else storeSelected.add(m.session_id);
@@ -855,6 +1512,9 @@ function syncStoreSel() {
   const n = storeSelected.size, btn = document.getElementById('pullManyBtn');
   btn.disabled = n === 0;
   btn.textContent = n ? `Pull selected (${n})` : 'Pull selected';
+  const del = document.getElementById('removeManyBtn');
+  del.disabled = n === 0;
+  del.textContent = n ? `Delete (${n})` : 'Delete';
   const vis = storeVisible();
   document.getElementById('storePickAll').checked = vis.length > 0 && vis.every(m => storeSelected.has(m.session_id));
 }
@@ -882,6 +1542,9 @@ async function openPullMany() {
   document.getElementById('pmForce').checked = false;
   document.getElementById('pmDone').classList.add('hidden');
   document.getElementById('pmGo').disabled = false;
+  const btn = document.getElementById('pullManyBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> Preparing…';
   try {
     let r = await api('/api/pull-plan', { ids: pmIds, map: pmRules || [] });
     if (pmRules === null) { // first time for this store: start from the suggestion
@@ -893,6 +1556,7 @@ async function openPullMany() {
     document.getElementById('pmTitle').textContent = `Pull ${pmIds.length} session(s)`;
     document.getElementById('pullManyDlg').showModal();
   } catch (e) { toast(e.message, true); }
+  syncStoreSel();
 }
 
 function renderRules() {
@@ -942,8 +1606,11 @@ function renderPlan(plan) {
 
 async function doPullMany() {
   busy('pmGo', 'pmSpin', true, 'pmGoLbl', 'Pulling…', 'Pull');
+  document.getElementById('pmDone').classList.add('hidden');
+  const stop = trackProgress('pmProg', 'pullManyDlg', 'pmClose');
   try {
     const r = await api('/api/pull-many', { ids: pmIds, map: cleanRules(), force: document.getElementById('pmForce').checked });
+    stop();
     saveRules();
     const done = document.getElementById('pmDone');
     done.innerHTML = `Pulled ${r.pulled}, already up to date ${r.unchanged}` +
@@ -951,22 +1618,90 @@ async function doPullMany() {
         `<li><div class="ttl">${esc(f.title) || esc(short(f.id))}</div><div class="mono">${esc(f.error)}</div></li>`).join('') + '</ul>' : '.');
     done.classList.remove('hidden');
     toast(`Pulled ${r.pulled} session(s)` + (r.failed.length ? `, ${r.failed.length} not pulled` : ''), r.failed.length > 0);
-    if (!r.failed.length) { storeSelected.clear(); renderStore(); }
-  } catch (e) { toast(e.message, true); }
+    if (!r.failed.length) storeSelected.clear();
+    loadStatus();
+  } catch (e) { stop(); toast(e.message, true); }
   busy('pmGo', 'pmSpin', false, 'pmGoLbl', 'Pulling…', 'Pull');
 }
 
-async function doRemove(m) {
-  const name = m.title || short(m.session_id);
-  const yes = await askConfirm(`Delete “${name}” from the store?`,
-    'Local copies on your machines are not touched. Old versions stay in the store repo’s git history.',
-    'Delete', true);
+function doRemove(m) { return removeFromStore([m]); }
+
+function removeSelected() {
+  return removeFromStore(storeMetas.filter(m => storeSelected.has(m.session_id)));
+}
+
+async function removeFromStore(metas) {
+  if (!metas.length) return;
+  const title = metas.length === 1
+    ? `Delete “${metas[0].title || short(metas[0].session_id)}” from the store?`
+    : `Delete ${metas.length} sessions from the store?`;
+  const yes = await askConfirm(title,
+    '<ul class="pushlist">' +
+    '<li>Claude Code sessions on your machines are <b>not</b> touched — only the store copy goes.</li>' +
+    '<li>Other machines stop seeing it in the store — but a machine that pushes it again brings it back.</li>' +
+    (isGitStore()
+      ? '<li>Its encrypted versions stay in the store repo’s git history.</li>'
+      : '<li>In a synced folder it is gone for good (your sync service’s trash may keep a copy).</li>') +
+    '</ul>', 'Delete', true);
   if (!yes) return;
+  toast('Deleting…');
   try {
-    await api('/api/remove', { ids: [m.session_id] });
-    toast('Deleted from the store');
+    const r = await api('/api/remove', { ids: metas.map(m => m.session_id) });
+    metas.forEach(m => storeSelected.delete(m.session_id));
+    toast(`Deleted ${r.removed} session(s) from the store`);
     loadStore();
   } catch (e) { toast(e.message, true); }
+}
+
+// openInfo shows a session's details and its last messages, from this
+// machine's copy or the store's.
+async function openInfo(from, x) {
+  const local = from === 'local';
+  const id = local ? x.ID : x.session_id, title = local ? x.Title : x.title;
+  document.getElementById('infoTitle').textContent = title || '(untitled)';
+  document.getElementById('infoSub').innerHTML =
+    (local ? localBadge(id) : missingHere(id) ? badge(['acc', 'Not here', 'Not on this machine']) : '') +
+    (local && x.Active ? '<span class="badge active">active</span>' : '');
+  const copy = text => `<button class="iconbtn" title="Copy" aria-label="Copy" data-copy="${esc(text)}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button>`;
+  const cwd = local ? x.Cwd : x.original_cwd;
+  const rows = [
+    ['Session', `<span class="mono">${esc(id)}</span>${copy(id)}`],
+    ['Project', cwd ? `<span class="mono">${esc(cwd)}</span>` : '<span class="muted">unknown</span>'],
+    ['Modified', esc(when(local ? x.Mtime : x.session_mtime))],
+    ['Size', esc(size(local ? x.Size : x.size))],
+  ];
+  if (!local) rows.push(['From', esc(x.hostname || '?')], ['Pushed', esc(when(x.pushed_at))]);
+  const ver = local ? x.Version : x.claude_version;
+  if (ver) rows.push(['Claude Code', esc(ver)]);
+  if (local) rows.push(['Resume', `<span class="mono">claude --resume ${esc(id)}</span>${copy('claude --resume ' + id)}`]);
+  const facts = document.getElementById('infoFacts');
+  facts.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+  facts.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => copyText(b.dataset.copy));
+  const pull = document.getElementById('infoPull');
+  pull.classList.toggle('hidden', local);
+  pull.onclick = () => { infoDlg.close(); openPull(x); };
+  const box = document.getElementById('infoMsgs');
+  box.innerHTML = loadingHTML(local ? 'Reading…' : 'Decrypting…');
+  document.getElementById('infoDlg').showModal();
+  try {
+    const msgs = await api(`/api/preview?from=${local ? 'local' : 'store'}&id=${encodeURIComponent(id)}`);
+    box.innerHTML = msgs.length ? msgs.map(m => {
+      const user = m.role === 'user';
+      return `<div class="msg${user ? ' user' : ''}"><span class="av" aria-hidden="true">${user ? 'Y' : 'C'}</span>` +
+        `<div class="bubble"><div class="who">${user ? 'You' : 'Claude'}${m.time ? `<time>${esc(when(m.time))}</time>` : ''}</div>` +
+        `<div class="txt">${esc(m.text)}</div><div class="more">Show more</div></div></div>`;
+    }).join('') : '<div class="empty">No messages to show.</div>';
+    // Long messages show 3 lines; a click opens or closes one.
+    box.querySelectorAll('.msg').forEach(el => {
+      const txt = el.querySelector('.txt');
+      el.classList.toggle('clipped', txt.scrollHeight > txt.clientHeight + 1);
+      el.querySelector('.bubble').onclick = () => {
+        if (!el.classList.contains('clipped')) return;
+        const open = el.classList.toggle('open');
+        el.querySelector('.more').textContent = open ? 'Show less' : 'Show more';
+      };
+    });
+  } catch (e) { box.innerHTML = `<div class="empty">Couldn’t read the messages: ${esc(e.message)}</div>`; }
 }
 
 function openPull(m) {
@@ -983,10 +1718,13 @@ async function doPull() {
   const dest = document.getElementById('pullDest').value.trim();
   if (!dest) return toast('destination directory is required', true);
   busy('pullGo', 'pullSpin', true, 'pullGoLbl', 'Pulling…', 'Pull');
+  document.getElementById('pullDone').classList.add('hidden');
+  const stop = trackProgress('pullProg', 'pullDlg', 'pullClose');
   try {
     const r = await api('/api/pull', {
       id: pullTarget, dest, force: document.getElementById('pullForce').checked,
     });
+    stop();
     const done = document.getElementById('pullDone');
     const what = r.unchanged ? 'Already up to date.'
       : r.updated ? 'Updated to the newer store copy.'
@@ -996,7 +1734,8 @@ async function doPull() {
       `onclick="navigator.clipboard.writeText(this.textContent);toast('Copied')">${esc(r.resume)}</code>`;
     done.classList.remove('hidden');
     toast(r.unchanged ? 'Already up to date' : 'Session installed');
-  } catch (e) { toast(e.message, true); }
+    loadStatus();
+  } catch (e) { stop(); toast(e.message, true); }
   busy('pullGo', 'pullSpin', false, 'pullGoLbl', 'Pulling…', 'Pull');
 }
 

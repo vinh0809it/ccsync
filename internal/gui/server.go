@@ -45,6 +45,11 @@ type Server struct {
 	// unlocked client, and two git operations must never run at once.
 	op     sync.Mutex
 	client *app.Client // set after a successful unlock
+
+	// progress is the running operation's, readable while op is held.
+	progMu   sync.Mutex
+	progress app.Progress
+	link     string // the unlocked store's storeLink, readable while op is held
 }
 
 // NewServer returns a server with a fresh token. git never prompts for
@@ -83,8 +88,11 @@ func (s *Server) Handler() http.Handler {
 		w.Write(indexHTML)
 	})
 	mux.HandleFunc("POST /api/session", s.handleSession)
+	// Progress is polled while another request runs, so it isn't serialized.
+	mux.HandleFunc("GET /api/progress", s.checkToken(s.handleProgress))
+	mux.HandleFunc("POST /api/open", s.checkToken(s.handleOpen))
 	api := func(pattern string, h http.HandlerFunc) {
-		mux.HandleFunc(pattern, s.guard(h))
+		mux.HandleFunc(pattern, s.checkToken(s.serialize(h)))
 	}
 	api("GET /api/state", s.handleState)
 	api("POST /api/setup", s.handleSetup)
@@ -94,11 +102,15 @@ func (s *Server) Handler() http.Handler {
 	api("GET /api/projects", s.handleProjects)
 	api("GET /api/local", s.handleLocal)
 	api("GET /api/store", s.handleStore)
+	api("GET /api/status", s.handleStatus)
 	api("POST /api/push", s.handlePush)
 	api("POST /api/pull", s.handlePull)
 	api("POST /api/pull-plan", s.handlePullPlan)
 	api("POST /api/pull-many", s.handlePullMany)
 	api("POST /api/remove", s.handleRemove)
+	api("POST /api/compact", s.handleCompact)
+	api("GET /api/history", s.handleHistory)
+	api("GET /api/preview", s.handlePreview)
 	return localOnly(mux)
 }
 
@@ -144,18 +156,43 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	ok(w, map[string]string{"token": s.token})
 }
 
-// guard checks the token and serializes the request.
-func (s *Server) guard(h http.HandlerFunc) http.HandlerFunc {
+// checkToken rejects requests without the session token.
+func (s *Server) checkToken(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		got := r.Header.Get("X-CCSync-Token")
 		if subtle.ConstantTimeCompare([]byte(got), []byte(s.token)) != 1 {
 			fail(w, http.StatusForbidden, fmt.Errorf("bad or missing token — reopen the URL ccsync printed"))
 			return
 		}
+		h(w, r)
+	}
+}
+
+// serialize runs one request at a time.
+func (s *Server) serialize(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		s.op.Lock()
 		defer s.op.Unlock()
 		h(w, r)
 	}
+}
+
+// setClient makes c the unlocked store, reporting its progress here.
+func (s *Server) setClient(c *app.Client) {
+	if c != nil {
+		c.OnProgress = func(p app.Progress) {
+			s.progMu.Lock()
+			s.progress = p
+			s.progMu.Unlock()
+		}
+	}
+	s.client = c
+	s.progMu.Lock()
+	s.link = ""
+	if c != nil {
+		s.link = storeLink(c.Entry)
+	}
+	s.progMu.Unlock()
 }
 
 // Listen binds the GUI server to 127.0.0.1:port (0 picks a free port) and

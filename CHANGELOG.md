@@ -49,6 +49,19 @@
 - The GUI could run two git operations on the store at once.
 
 ### Changed
+- Pushing a session the store already has in sync no longer packs or
+  encrypts it (the fingerprint recorded at push tells).
+- Listing local sessions reads a big transcript only at both ends (its
+  first lines and the last megabyte) instead of all of it: 45 real
+  sessions (1.1 GB) list in 0.18 s instead of 0.8 s.
+- Redesigned GUI: start screens with a brand panel beside the store
+  picker, stores and store kinds picked from cards, errors next to the
+  form, passphrases that can be revealed; a light and a dark theme (the
+  system's by default). The store's location sits in the store list with
+  Copy and Open (its web page or folder). Loading states while a project
+  or the store loads; long store names no longer break the header.
+- Switch store answers at once: it shows that it's working and stops a
+  running sync-status check instead of waiting for it.
 - Unlocking derives the passphrase key once; sessions are encrypted to a
   random store key. Listing 100 sessions no longer takes ~1 minute.
 - Sessions are gzipped before encryption (a real 38 MB project stored as
@@ -61,6 +74,26 @@
 - The GUI API accepts only the intended HTTP method per endpoint.
 
 ### Added
+- Session details in the GUI: an info button on every session shows its
+  id, project, host, dates and resume command, with a preview of its last
+  messages (decrypted for a store copy). Status badges are one word, and
+  hovering a cut-off name shows it in full.
+- `ccsync compact --yes` (and a button in the GUI) replaces a git store's
+  history with a single commit of its current sessions, freeing the space
+  that replaced and deleted versions take. A push it hasn't seen is never
+  overwritten; other machines follow the new history by themselves. The
+  GUI's confirmation shows the history's current size.
+- Sync status in the GUI: every session on this machine shows whether it
+  is synced, newer here, newer in the store, diverged or not pushed yet,
+  with a count of the ones to act on; store sessions not on this machine
+  are marked too. Pushes record a fingerprint of the
+  session's entries, so in-sync copies are recognized without decrypting.
+- Progress for push and pull. A push runs in two steps, each counted:
+  encrypting every session, then uploading them (git's file count), at
+  most 5 commits per git push; the GUI shows the step and count, the CLI keeps a status line on
+  the terminal.
+- Delete several store sessions at once in the GUI; the "not on this machine" count
+  filters the store list to those, e.g. to delete sessions removed here.
 - Pull many sessions at once: `pull --all` / `pull <id>...` and **Pull
   selected** in the GUI, each to its original project path moved by folder
   mappings (`--map FROM=TO`; the GUI proposes one when the home directory
@@ -88,8 +121,9 @@
 - A pulled session keeps its original modification time.
 - Active sessions met during a push are skipped and reported instead of
   aborting the whole push.
-- `ccsync push --all-projects`, and "All projects" in the GUI. Large pushes
-  are split into commits of at most ~64 MB so memory stays bounded.
+- `ccsync push --all-projects`, and "All projects" in the GUI. Sessions are
+  encrypted one at a time, so memory stays bounded however many are
+  pushed; a large push becomes several commits of about 64 MB.
 - Native-window apps for Windows, macOS (.app) and Linux (with an installer),
   built by the release workflow. `ccsync` with no arguments opens the GUI, so
   every download works on double-click.

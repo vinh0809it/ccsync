@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,8 +49,8 @@ type pushItem struct {
 	payload    []byte
 }
 
-// batchBytes bounds how much session data one publish holds in memory;
-// larger pushes become several commits.
+// batchBytes is how much session data one push commit holds at most
+// (a session larger than that gets a commit of its own).
 const batchBytes = 64 << 20
 
 // Push bundles the given local sessions into the store and publishes them,
@@ -72,7 +73,7 @@ func (c *Client) push(sessions []session.Session, fallbackCwd string, opts PushO
 		return PushResult{}, fmt.Errorf("nothing to push")
 	}
 	// Re-read every session: the caller's listing may predate new activity.
-	var total PushResult
+	var active []session.Session
 	fresh := make([]session.Session, 0, len(sessions))
 	for _, s := range sessions {
 		s, err := session.Load(s.File)
@@ -80,139 +81,162 @@ func (c *Client) push(sessions []session.Session, fallbackCwd string, opts PushO
 			return PushResult{}, err // unreadable; a parse problem alone still pushes
 		}
 		if time.Since(s.Mtime) < ActiveGrace && !opts.IncludeActive {
-			total.Active = append(total.Active, s)
+			active = append(active, s)
 			continue
 		}
 		fresh = append(fresh, s)
 	}
-	for _, batch := range batches(fresh, batchBytes) {
-		items, err := bundleAll(batch, fallbackCwd)
-		if err != nil {
-			return total, err
+	for attempt := 1; ; attempt++ {
+		res, staged, err := c.stagePush(fresh, fallbackCwd, opts)
+		res.Active = active
+		if err != nil || staged == 0 {
+			return res, err
 		}
-		res, err := c.pushBatch(items, opts)
-		total.Pushed = append(total.Pushed, res.Pushed...)
-		total.Skipped = append(total.Skipped, res.Skipped...)
-		total.Rejected = append(total.Rejected, res.Rejected...)
-		if err != nil {
-			return total, err
+		beforePush()
+		c.progress("Uploading files", 0, 0)
+		err = c.store.PushProgress(func(p store.UploadProgress) {
+			// Git counts files (blobs and folders), not sessions.
+			step := "Uploading files"
+			if p.Parts > 1 {
+				step = fmt.Sprintf("Uploading files, part %d of %d", p.Part, p.Parts)
+			}
+			c.progress(step, p.Done, p.Total)
+		})
+		// A failed push leaves unpublished commits that the next sync
+		// discards, so a later run can never mistake them for published.
+		if err == nil || !errors.Is(err, store.ErrRemoteMoved) || attempt == publishAttempts {
+			return res, err
 		}
 	}
-	return total, nil
 }
 
-// batches splits sessions into runs of at most limit bytes (a session
-// larger than limit gets a batch of its own).
-func batches(sessions []session.Session, limit int64) [][]session.Session {
-	var out [][]session.Session
-	var cur []session.Session
-	var size int64
-	for _, s := range sessions {
-		if len(cur) > 0 && size+s.Size > limit {
-			out = append(out, cur)
-			cur, size = nil, 0
-		}
-		cur = append(cur, s)
-		size += s.Size
-	}
-	if len(cur) > 0 {
-		out = append(out, cur)
-	}
-	return out
-}
-
-// pushBatch publishes one batch as one commit.
-func (c *Client) pushBatch(items []pushItem, opts PushOptions) (PushResult, error) {
+// stagePush encrypts sessions into a freshly synced store, one at a time,
+// committing every batchBytes of session data so a commit stays a
+// reasonable size. A store copy is replaced only as Push allows. It
+// returns how many sessions were committed; nothing is uploaded yet.
+func (c *Client) stagePush(sessions []session.Session, fallbackCwd string, opts PushOptions) (PushResult, int, error) {
 	var res PushResult
-	err := c.publish(
+	if err := c.sync(); err != nil {
+		return res, 0, err
+	}
+	staged, pending := 0, 0
+	var pendingBytes int64
+	commit := func() error {
+		if pending == 0 {
+			return nil
+		}
 		// Commit messages are world-readable on a public remote: no
 		// hostname, no titles — those live only in the encrypted metadata.
-		func(n int) string { return fmt.Sprintf("ccsync: push %d session(s)", n) },
-		func() (int, error) {
-			res = PushResult{}
-			for _, it := range items {
-				// An unreadable store entry (e.g. from an outdated ccsync)
-				// can't be compared; replacing it is the fix.
-				existing, found, err := c.store.Lookup(c.key, it.meta.SessionID)
-				found = found && err == nil
-				if found && existing.ContentHash == it.meta.ContentHash {
-					res.Skipped = append(res.Skipped, it.meta.SessionID)
-					continue
-				}
-				if found {
-					rel, err := c.relationToStore(it, existing)
-					if err != nil {
-						rel = session.Unknown // unreadable store copy: needs Overwrite
-					}
-					switch {
-					case rel == session.Same:
-						// The copies differ only in relocated paths or
-						// bookkeeping, e.g. a session pulled to another path
-						// and not continued.
-						res.Skipped = append(res.Skipped, it.meta.SessionID)
-						continue
-					case rel != session.Ahead && !opts.Overwrite:
-						res.Rejected = append(res.Rejected, Rejection{Local: it.session, Store: existing, Relation: rel})
-						continue
-					}
-				}
-				it.meta.PushedAt = time.Now().UTC()
-				if err := c.store.Put(c.key, it.meta, it.payload); err != nil {
-					return 0, err
-				}
-				res.Pushed = append(res.Pushed, it.meta)
-			}
-			return len(res.Pushed), nil
-		})
-	if err != nil {
-		return PushResult{}, err
+		if err := c.store.Commit(fmt.Sprintf("ccsync: push %d session(s)", pending)); err != nil {
+			return err
+		}
+		staged += pending
+		pending, pendingBytes = 0, 0
+		return nil
 	}
-	return res, nil
+	host, _ := os.Hostname()
+	// First drop what the store already has (same entries, by the
+	// fingerprint pushes record): those need no packing or encrypting.
+	var changed []session.Session
+	for i, s := range sessions {
+		c.progress("Checking", i, len(sessions))
+		if existing, found, err := c.store.Lookup(c.key, s.ID); err == nil && found && existing.Entries != "" {
+			if transcript, err := os.ReadFile(s.File); err == nil && session.Fingerprint(transcript) == existing.Entries {
+				res.Skipped = append(res.Skipped, s.ID)
+				continue
+			}
+		}
+		changed = append(changed, s)
+	}
+	for i, s := range changed {
+		c.progress("Encrypting", i, len(changed))
+		it, err := bundle(s, fallbackCwd, host)
+		if err != nil {
+			return res, 0, err
+		}
+		// An unreadable store entry (e.g. from an outdated ccsync) can't
+		// be compared; replacing it is the fix.
+		existing, found, err := c.store.Lookup(c.key, it.meta.SessionID)
+		found = found && err == nil
+		if found && existing.ContentHash == it.meta.ContentHash {
+			res.Skipped = append(res.Skipped, it.meta.SessionID)
+			continue
+		}
+		if found {
+			rel, err := c.compareWithStore(it.transcript, existing)
+			if err != nil {
+				rel = session.Unknown // unreadable store copy: needs Overwrite
+			}
+			switch {
+			case rel == session.Same:
+				// The copies differ only in relocated paths or bookkeeping,
+				// e.g. a session pulled to another path and not continued.
+				res.Skipped = append(res.Skipped, it.meta.SessionID)
+				continue
+			case rel != session.Ahead && !opts.Overwrite:
+				res.Rejected = append(res.Rejected, Rejection{Local: it.session, Store: existing, Relation: rel})
+				continue
+			}
+		}
+		it.meta.PushedAt = time.Now().UTC()
+		if err := c.store.Put(c.key, it.meta, it.payload); err != nil {
+			return res, 0, err
+		}
+		res.Pushed = append(res.Pushed, it.meta)
+		pending++
+		if pendingBytes += s.Size; pendingBytes >= batchBytes {
+			if err := commit(); err != nil {
+				return res, 0, err
+			}
+		}
+	}
+	err := commit()
+	return res, staged, err
 }
 
-// relationToStore compares a local session with its store copy.
-func (c *Client) relationToStore(it pushItem, existing store.Meta) (session.Relation, error) {
-	payload, err := c.store.OpenPayload(c.key, existing.SessionID)
+// compareWithStore relates a local transcript to the store copy meta
+// describes, decrypting that copy only when their fingerprints differ.
+func (c *Client) compareWithStore(transcript []byte, meta store.Meta) (session.Relation, error) {
+	if meta.Entries != "" && session.Fingerprint(transcript) == meta.Entries {
+		return session.Same, nil
+	}
+	payload, err := c.store.OpenPayload(c.key, meta.SessionID)
 	if err != nil {
 		return 0, err
 	}
 	defer payload.Close()
 	stored, err := session.Unpack(payload)
 	if err != nil {
-		return 0, fmt.Errorf("session %s: %w", existing.SessionID, err)
+		return 0, fmt.Errorf("session %s: %w", meta.SessionID, err)
 	}
-	return session.Compare(it.transcript, stored.Transcript), nil
+	return session.Compare(transcript, stored.Transcript), nil
 }
 
-// bundleAll reads and bundles each session.
-func bundleAll(sessions []session.Session, fallbackCwd string) ([]pushItem, error) {
-	host, _ := os.Hostname()
-	var items []pushItem
-	for _, s := range sessions {
-		contents, err := session.ReadContents(s)
-		if err != nil {
-			return nil, err
-		}
-		payload, hash, err := session.Pack(contents)
-		if err != nil {
-			return nil, err
-		}
-		cwd := s.Cwd
-		if cwd == "" {
-			cwd = fallbackCwd
-		}
-		items = append(items, pushItem{session: s, transcript: contents.Transcript, payload: payload, meta: store.Meta{
-			SessionID:     s.ID,
-			Title:         s.Title,
-			ProjectLabel:  filepath.Base(cwd),
-			OriginalCwd:   cwd,
-			SessionDir:    s.Dir,
-			Hostname:      host,
-			ClaudeVersion: s.Version,
-			SessionMtime:  s.Mtime,
-			Size:          s.Size,
-			ContentHash:   hash,
-		}})
+// bundle reads and packs one session for the store.
+func bundle(s session.Session, fallbackCwd, host string) (pushItem, error) {
+	contents, err := session.ReadContents(s)
+	if err != nil {
+		return pushItem{}, err
 	}
-	return items, nil
+	payload, hash, err := session.Pack(contents)
+	if err != nil {
+		return pushItem{}, err
+	}
+	cwd := s.Cwd
+	if cwd == "" {
+		cwd = fallbackCwd
+	}
+	return pushItem{session: s, transcript: contents.Transcript, payload: payload, meta: store.Meta{
+		SessionID:     s.ID,
+		Title:         s.Title,
+		ProjectLabel:  filepath.Base(cwd),
+		OriginalCwd:   cwd,
+		SessionDir:    s.Dir,
+		Hostname:      host,
+		ClaudeVersion: s.Version,
+		SessionMtime:  s.Mtime,
+		Size:          s.Size,
+		ContentHash:   hash,
+		Entries:       session.Fingerprint(contents.Transcript),
+	}}, nil
 }

@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -256,25 +258,6 @@ func appendLine(t *testing.T, file, line string) {
 	testutil.WriteFile(t, file, string(data)+line+"\n")
 }
 
-func TestBatches(t *testing.T) {
-	s := func(size int64) session.Session { return session.Session{Size: size} }
-	got := batches([]session.Session{s(40), s(30), s(100), s(10), s(10)}, 64)
-	var sizes [][]int64
-	for _, b := range got {
-		var row []int64
-		for _, x := range b {
-			row = append(row, x.Size)
-		}
-		sizes = append(sizes, row)
-	}
-	want := "[[40] [30] [100] [10 10]]"
-	if fmt.Sprint(sizes) != want {
-		t.Fatalf("batches = %v, want %s", sizes, want)
-	}
-}
-
-// TestPushOverUnreadableStoreCopy: an unreadable store copy is reported,
-// not fatal to the batch, and replaced when overwriting.
 func TestPushOverUnreadableStoreCopy(t *testing.T) {
 	m, c := machine(t, testutil.Remote(t))
 	bad := localSession(t, m, "cdcdcdcd-aaaa-bbbb-cccc-000000000001", `{"type":"user","uuid":"u1"}`)
@@ -393,5 +376,105 @@ func TestPullMany(t *testing.T) {
 	sel, err := cb.PullMany([]string{"12340000-aaaa-bbbb-cccc-000000000002"}, m, false)
 	if err != nil || len(sel.Unchanged) != 1 || len(sel.Pulled)+len(sel.Failed) != 0 {
 		t.Fatalf("selected pull: %+v %v", sel, err)
+	}
+}
+
+func TestPushReportsProgress(t *testing.T) {
+	m, c := machine(t, testutil.Remote(t))
+	a := localSession(t, m, "77777777-aaaa-bbbb-cccc-0000000000a1", `{"type":"user","uuid":"a1"}`)
+	b := localSession(t, m, "77777777-aaaa-bbbb-cccc-0000000000a2", `{"type":"user","uuid":"b1"}`)
+	var steps []Progress
+	c.OnProgress = func(p Progress) { steps = append(steps, p) }
+
+	if _, err := c.Push([]session.Session{a, b}, "", PushOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, p := range steps {
+		seen[p.Step] = true
+		switch {
+		case p.Step == "Encrypting" && (p.Total != 2 || p.Done < 0 || p.Done >= p.Total),
+			p.Step == "Uploading files" && (p.Done < 0 || p.Done > p.Total):
+			t.Errorf("bad count: %+v", p)
+		}
+	}
+	// Two steps after the sync: encrypt everything, then upload it once.
+	order := []string{}
+	for _, p := range steps {
+		if p.Step != "" && (len(order) == 0 || order[len(order)-1] != p.Step) {
+			order = append(order, p.Step)
+		}
+	}
+	if fmt.Sprint(order) != "[Syncing with the store Checking Encrypting Uploading files]" {
+		t.Errorf("steps = %v", order)
+	}
+	for _, step := range []string{"Syncing with the store", "Checking", "Encrypting", "Uploading files"} {
+		if !seen[step] {
+			t.Errorf("no %q step in %+v", step, steps)
+		}
+	}
+	if last := steps[len(steps)-1]; last != (Progress{}) {
+		t.Errorf("the operation must end with the zero Progress, got %+v", last)
+	}
+	// Pushing again with one session changed encrypts only that one.
+	appendLine(t, a.File, `{"type":"user","uuid":"more"}`)
+	steps = nil
+	if _, err := c.Push([]session.Session{a, b}, "", PushOptions{IncludeActive: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range steps {
+		if (p.Step == "Encrypting" && p.Total != 1) || (p.Step == "Checking" && p.Total != 2) {
+			t.Errorf("second push: %+v", p)
+		}
+	}
+}
+
+func TestStatus(t *testing.T) {
+	m, c := machine(t, testutil.Remote(t))
+	id := "77777777-aaaa-bbbb-cccc-0000000000b1"
+	s := localSession(t, m, id, `{"type":"user","uuid":"u1"}`)
+	status := func(want session.Relation, present bool) {
+		t.Helper()
+		s, err := session.Load(s.File)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := c.Status(context.Background(), []session.Session{s})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rel, ok := got[id]; ok != present || (present && rel != want) {
+			t.Fatalf("status = %v (present %v), want %v (present %v)", rel, ok, want, present)
+		}
+	}
+	status(0, false) // not in the store
+
+	if _, err := c.Push([]session.Session{s}, "", PushOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	status(session.Same, true)
+
+	appendLine(t, s.File, `{"type":"user","uuid":"u2"}`)
+	status(session.Ahead, true)
+
+	// The store moves on (u1, u2, u3); this machine rewinds to u1 only.
+	appendLine(t, s.File, `{"type":"user","uuid":"u3"}`)
+	if res, err := c.Push([]session.Session{s}, "", PushOptions{}); err != nil || len(res.Pushed) != 1 {
+		t.Fatalf("push: %+v %v", res, err)
+	}
+	rewrite := func(lines ...string) {
+		lines = append([]string{testutil.CwdLine(project)}, lines...)
+		testutil.WriteFile(t, s.File, strings.Join(lines, "\n")+"\n")
+	}
+	rewrite(`{"type":"user","uuid":"u1"}`)
+	status(session.Behind, true)
+
+	rewrite(`{"type":"user","uuid":"u1"}`, `{"type":"user","uuid":"u4"}`)
+	status(session.Diverged, true)
+	// A cancelled request (the GUI switching store) stops early.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := c.Status(ctx, []session.Session{s}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled status: err = %v", err)
 	}
 }

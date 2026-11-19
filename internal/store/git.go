@@ -1,10 +1,15 @@
 package store
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -18,6 +23,15 @@ func (g gitTransport) git(args ...string) (string, error) {
 }
 
 func (g gitTransport) gitIn(dir string, args ...string) (string, error) {
+	out, err := g.command(dir, args...).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// command prepares git to run in dir with the store's settings.
+func (g gitTransport) command(dir string, args ...string) *exec.Cmd {
 	full := append([]string{"-C", dir,
 		"-c", "user.name=ccsync", "-c", "user.email=ccsync@localhost",
 		// A global signing setup would prompt or fail on store commits.
@@ -32,11 +46,7 @@ func (g gitTransport) gitIn(dir string, args ...string) (string, error) {
 	if !g.s.Interactive {
 		cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0")
 	}
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(out)))
-	}
-	return strings.TrimSpace(string(out)), nil
+	return cmd
 }
 
 // open clones repoURL (or adopts an existing clone of it) and brings it up
@@ -174,13 +184,190 @@ func containsPath(list, p string) bool {
 
 // push publishes the current branch with an explicit refspec (independent
 // of the user's push.default) and sets its upstream.
-func (g gitTransport) push() error {
-	_, err := g.git("push", "--quiet", "-u", "origin", "HEAD")
+//
+// With progress set, the unpublished commits go up pushCommits at a time,
+// so one push never carries more than a few batches of data; each push
+// that succeeds stays published even if a later one fails.
+func (g gitTransport) push(progress func(UploadProgress)) error {
+	if progress == nil {
+		_, err := g.git("push", "--quiet", "-u", "origin", "HEAD")
+		return remoteMoved(err)
+	}
+	ends := []string{"HEAD"}
+	upstream, err := g.git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+	branch, ok := strings.CutPrefix(upstream, "origin/")
+	if err == nil && ok {
+		list, err := g.git("rev-list", "--reverse", "@{u}..HEAD")
+		if err != nil {
+			return err
+		}
+		commits := strings.Fields(list)
+		ends = nil
+		for i := pushCommits; i < len(commits); i += pushCommits {
+			ends = append(ends, commits[i-1]+":refs/heads/"+branch)
+		}
+		ends = append(ends, "HEAD")
+	}
+	for i, end := range ends {
+		err := g.gitProgress(func(done, total int) {
+			progress(UploadProgress{Part: i + 1, Parts: len(ends), Done: done, Total: total})
+		}, "push", "--progress", "-u", "origin", end)
+		if err != nil {
+			return remoteMoved(err)
+		}
+	}
+	return nil
+}
+
+// pushCommits is how many commits one push carries at most.
+const pushCommits = 5
+
+// UploadProgress is how far a push is: part Part of Parts, Done of Total
+// files (git objects) uploaded in this part.
+type UploadProgress struct{ Part, Parts, Done, Total int }
+
+// remoteMoved marks a push rejected because another machine pushed first.
+func remoteMoved(err error) error {
 	if err != nil && (strings.Contains(err.Error(), "fetch first") ||
 		strings.Contains(err.Error(), "non-fast-forward")) {
 		return fmt.Errorf("%w: %v", ErrRemoteMoved, err)
 	}
 	return err
+}
+
+// History is how much a git store's history holds.
+func (g gitTransport) history() (History, error) {
+	count, err := g.git("rev-list", "--count", "HEAD")
+	if err != nil {
+		return History{}, err
+	}
+	n, err := strconv.Atoi(count)
+	if err != nil {
+		return History{}, err
+	}
+	size, err := g.historySize()
+	return History{Commits: n, Bytes: size}, err
+}
+
+// writingObjects matches git's upload progress: "Writing objects:  45% (9/20)".
+var writingObjects = regexp.MustCompile(`Writing objects:\s+\d+% \((\d+)/(\d+)\)`)
+
+// gitProgress runs git like git(), reporting its "Writing objects"
+// progress as it streams by.
+func (g gitTransport) gitProgress(progress func(done, total int), args ...string) error {
+	cmd := g.command(g.s.Dir, args...)
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+	cmd.Stdout = io.Discard
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	var out strings.Builder
+	sc := bufio.NewScanner(stderr)
+	sc.Split(scanCRLF) // progress lines end in \r
+	for sc.Scan() {
+		line := sc.Text()
+		if m := writingObjects.FindStringSubmatch(line); m != nil {
+			done, _ := strconv.Atoi(m[1])
+			total, _ := strconv.Atoi(m[2])
+			progress(done, total)
+			continue
+		}
+		out.WriteString(line + "\n")
+	}
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(out.String()))
+	}
+	return nil
+}
+
+// scanCRLF splits at \r or \n.
+func scanCRLF(data []byte, atEOF bool) (int, []byte, error) {
+	if i := bytes.IndexAny(data, "\r\n"); i >= 0 {
+		return i + 1, data[:i], nil
+	}
+	if atEOF && len(data) > 0 {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
+}
+
+// compact pushes a parentless commit of the current tree in place of the
+// remote branch. The push is leased on the commit the clone was synced to,
+// so a push another machine made meanwhile is never overwritten. The
+// clone's old objects are then pruned.
+func (g gitTransport) compact() (CompactResult, error) {
+	var r CompactResult
+	upstream, err := g.git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+	if err != nil {
+		return r, err
+	}
+	branch, ok := strings.CutPrefix(upstream, "origin/")
+	if !ok {
+		return r, fmt.Errorf("store clone tracks %s, not a branch of origin", upstream)
+	}
+	old, err := g.git("rev-parse", "HEAD")
+	if err != nil {
+		return r, err
+	}
+	count, err := g.git("rev-list", "--count", "HEAD")
+	if err != nil {
+		return r, err
+	}
+	if r.Commits, err = strconv.Atoi(count); err != nil {
+		return r, err
+	}
+	if r.Before, err = g.historySize(); err != nil {
+		return r, err
+	}
+	if r.Commits <= 1 {
+		r.After = r.Before
+		return r, nil
+	}
+	fresh, err := g.git("commit-tree", "HEAD^{tree}", "-m", "ccsync: compact history")
+	if err != nil {
+		return r, err
+	}
+	ref := "refs/heads/" + branch
+	_, err = g.git("push", "--quiet", "--force-with-lease="+ref+":"+old, "origin", fresh+":"+ref)
+	if err != nil {
+		if strings.Contains(err.Error(), "stale info") || strings.Contains(err.Error(), "fetch first") ||
+			strings.Contains(err.Error(), "non-fast-forward") {
+			return r, fmt.Errorf("%w: %v", ErrRemoteMoved, err)
+		}
+		return r, err
+	}
+	if _, err := g.git("reset", "--hard", "--quiet", fresh); err != nil {
+		return r, err
+	}
+	// The remote is done; shrinking this clone is a bonus.
+	if _, err := g.git("reflog", "expire", "--expire=now", "--all"); err == nil {
+		_, _ = g.git("gc", "--quiet", "--prune=now")
+	}
+	r.After, err = g.historySize()
+	return r, err
+}
+
+// historySize is how many bytes the clone's git objects take.
+func (g gitTransport) historySize() (int64, error) {
+	out, err := g.git("count-objects", "-v")
+	if err != nil {
+		return 0, err
+	}
+	var kib int64
+	for _, line := range strings.Split(out, "\n") {
+		k, v, _ := strings.Cut(line, ": ")
+		if k == "size" || k == "size-pack" {
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil {
+				return 0, err
+			}
+			kib += n
+		}
+	}
+	return kib << 10, nil
 }
 
 // forget removes the local clone. It refuses a directory that isn't a

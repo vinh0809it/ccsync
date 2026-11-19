@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/vinh0809it/ccsync/internal/app"
@@ -97,14 +98,15 @@ func (c *cli) storeCmd(args []string) error {
 		if len(reg.Stores) == 0 {
 			return store.ErrNoStore
 		}
+		tw := tabwriter.NewWriter(c.out, 0, 0, 2, ' ', 0)
 		for _, e := range reg.Stores {
 			mark := " "
 			if e.Name == reg.Current {
 				mark = "*"
 			}
-			fmt.Fprintf(c.out, "%s %-20s %-6s %s\n", mark, e.Name, kindName(e.Kind), e.Location())
+			fmt.Fprintf(tw, "%s %s\t%s\t%s\n", mark, e.Name, kindName(e.Kind), e.Location())
 		}
-		return nil
+		return tw.Flush()
 	case args[0] == "use" && len(args) == 2:
 		if err := c.stores().Use(args[1]); err != nil {
 			return err
@@ -436,6 +438,36 @@ func (c *cli) rm(args []string) error {
 		fmt.Fprintf(c.out, "removed %s (%s)\n", m.SessionID, title(m.Title))
 	}
 	fmt.Fprintln(c.out, "Local copies are untouched; old versions remain in the store's git history.")
+	return nil
+}
+
+func (c *cli) compact(args []string) error {
+	fs := flag.NewFlagSet("compact", flag.ContinueOnError)
+	yes := fs.Bool("yes", false, "confirm: old versions can't be recovered afterwards")
+	if err := c.parseFlags(fs, args); err != nil {
+		return err
+	}
+	if !*yes {
+		fmt.Fprintln(c.err, "compact replaces the store's git history with one commit of its current")
+		fmt.Fprintln(c.err, "sessions. Replaced and deleted versions are gone for good; other machines")
+		fmt.Fprintln(c.err, "pick up the new history on their next command.")
+		return fmt.Errorf("%w: run again with --yes to go ahead", errUsage)
+	}
+	client, err := c.unlock()
+	if err != nil {
+		return err
+	}
+	r, err := client.Compact()
+	if err != nil {
+		return err
+	}
+	if r.Commits <= 1 {
+		fmt.Fprintln(c.out, "The store's history is already a single commit.")
+		return nil
+	}
+	fmt.Fprintf(c.out, "Compacted %d commits into 1; this clone's history went from %s to %s.\n",
+		r.Commits, humanSize(r.Before), humanSize(r.After))
+	fmt.Fprintln(c.out, "The git host may take a while to reclaim the space of the old history.")
 	return nil
 }
 
