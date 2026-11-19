@@ -394,7 +394,7 @@ func TestPushReportsProgress(t *testing.T) {
 		seen[p.Step] = true
 		switch {
 		case p.Step == "Encrypting" && (p.Total != 2 || p.Done < 0 || p.Done >= p.Total),
-			p.Step == "Uploading" && (p.Done < 0 || p.Done > p.Total):
+			p.Step == "Uploading files" && (p.Done < 0 || p.Done > p.Total):
 			t.Errorf("bad count: %+v", p)
 		}
 	}
@@ -405,16 +405,27 @@ func TestPushReportsProgress(t *testing.T) {
 			order = append(order, p.Step)
 		}
 	}
-	if fmt.Sprint(order) != "[Syncing with the store Encrypting Uploading]" {
+	if fmt.Sprint(order) != "[Syncing with the store Checking Encrypting Uploading files]" {
 		t.Errorf("steps = %v", order)
 	}
-	for _, step := range []string{"Syncing with the store", "Encrypting", "Uploading"} {
+	for _, step := range []string{"Syncing with the store", "Checking", "Encrypting", "Uploading files"} {
 		if !seen[step] {
 			t.Errorf("no %q step in %+v", step, steps)
 		}
 	}
 	if last := steps[len(steps)-1]; last != (Progress{}) {
 		t.Errorf("the operation must end with the zero Progress, got %+v", last)
+	}
+	// Pushing again with one session changed encrypts only that one.
+	appendLine(t, a.File, `{"type":"user","uuid":"more"}`)
+	steps = nil
+	if _, err := c.Push([]session.Session{a, b}, "", PushOptions{IncludeActive: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range steps {
+		if (p.Step == "Encrypting" && p.Total != 1) || (p.Step == "Checking" && p.Total != 2) {
+			t.Errorf("second push: %+v", p)
+		}
 	}
 }
 

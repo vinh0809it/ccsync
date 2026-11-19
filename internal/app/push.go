@@ -93,11 +93,12 @@ func (c *Client) push(sessions []session.Session, fallbackCwd string, opts PushO
 			return res, err
 		}
 		beforePush()
-		c.progress("Uploading", 0, 0)
+		c.progress("Uploading files", 0, 0)
 		err = c.store.PushProgress(func(p store.UploadProgress) {
-			step := "Uploading"
+			// Git counts files (blobs and folders), not sessions.
+			step := "Uploading files"
 			if p.Parts > 1 {
-				step = fmt.Sprintf("Uploading part %d of %d", p.Part, p.Parts)
+				step = fmt.Sprintf("Uploading files, part %d of %d", p.Part, p.Parts)
 			}
 			c.progress(step, p.Done, p.Total)
 		})
@@ -134,16 +135,21 @@ func (c *Client) stagePush(sessions []session.Session, fallbackCwd string, opts 
 		return nil
 	}
 	host, _ := os.Hostname()
+	// First drop what the store already has (same entries, by the
+	// fingerprint pushes record): those need no packing or encrypting.
+	var changed []session.Session
 	for i, s := range sessions {
-		c.progress("Encrypting", i, len(sessions))
-		// A session the store already has (same entries, by the
-		// fingerprint pushes record) needs no packing or encrypting.
+		c.progress("Checking", i, len(sessions))
 		if existing, found, err := c.store.Lookup(c.key, s.ID); err == nil && found && existing.Entries != "" {
 			if transcript, err := os.ReadFile(s.File); err == nil && session.Fingerprint(transcript) == existing.Entries {
 				res.Skipped = append(res.Skipped, s.ID)
 				continue
 			}
 		}
+		changed = append(changed, s)
+	}
+	for i, s := range changed {
+		c.progress("Encrypting", i, len(changed))
 		it, err := bundle(s, fallbackCwd, host)
 		if err != nil {
 			return res, 0, err
