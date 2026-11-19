@@ -2,7 +2,11 @@ package session
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"maps"
+	"slices"
 )
 
 // Relation says how one copy of a session's transcript relates to another.
@@ -65,6 +69,22 @@ func Compare(a, b []byte) Relation {
 	default:
 		return Same
 	}
+}
+
+// Fingerprint identifies a transcript's set of entries: two transcripts
+// with entries have equal fingerprints exactly when Compare finds them
+// Same. A transcript without entries has none ("").
+func Fingerprint(transcript []byte) string {
+	ids := entryIDs(transcript)
+	if len(ids) == 0 {
+		return ""
+	}
+	h := sha256.New()
+	for _, id := range slices.Sorted(maps.Keys(ids)) {
+		h.Write([]byte(id))
+		h.Write([]byte{'\n'})
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // entryIDs returns the identities of a transcript's entries: conversation

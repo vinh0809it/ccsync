@@ -148,7 +148,7 @@ func (c *Client) pushBatch(items []pushItem, opts PushOptions, step func(i int))
 					continue
 				}
 				if found {
-					rel, err := c.relationToStore(it, existing)
+					rel, err := c.compareWithStore(it.transcript, existing)
 					if err != nil {
 						rel = session.Unknown // unreadable store copy: needs Overwrite
 					}
@@ -178,18 +178,22 @@ func (c *Client) pushBatch(items []pushItem, opts PushOptions, step func(i int))
 	return res, nil
 }
 
-// relationToStore compares a local session with its store copy.
-func (c *Client) relationToStore(it pushItem, existing store.Meta) (session.Relation, error) {
-	payload, err := c.store.OpenPayload(c.key, existing.SessionID)
+// compareWithStore relates a local transcript to the store copy meta
+// describes, decrypting that copy only when their fingerprints differ.
+func (c *Client) compareWithStore(transcript []byte, meta store.Meta) (session.Relation, error) {
+	if meta.Entries != "" && session.Fingerprint(transcript) == meta.Entries {
+		return session.Same, nil
+	}
+	payload, err := c.store.OpenPayload(c.key, meta.SessionID)
 	if err != nil {
 		return 0, err
 	}
 	defer payload.Close()
 	stored, err := session.Unpack(payload)
 	if err != nil {
-		return 0, fmt.Errorf("session %s: %w", existing.SessionID, err)
+		return 0, fmt.Errorf("session %s: %w", meta.SessionID, err)
 	}
-	return session.Compare(it.transcript, stored.Transcript), nil
+	return session.Compare(transcript, stored.Transcript), nil
 }
 
 // bundleAll reads and bundles each session; step(i) reports that i are
@@ -222,6 +226,7 @@ func bundleAll(sessions []session.Session, fallbackCwd string, step func(i int))
 			SessionMtime:  s.Mtime,
 			Size:          s.Size,
 			ContentHash:   hash,
+			Entries:       session.Fingerprint(contents.Transcript),
 		}})
 	}
 	return items, nil

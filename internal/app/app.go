@@ -26,6 +26,8 @@ type Client struct {
 	// OnProgress, when set, is told how a running operation advances, and
 	// is called with the zero Progress when the operation ends.
 	OnProgress func(Progress)
+
+	status map[string]cachedRelation // Status results by session id
 }
 
 // Progress is how far a running operation is.

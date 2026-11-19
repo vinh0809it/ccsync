@@ -178,6 +178,13 @@
     letter-spacing: .03em; text-transform: uppercase; flex: none; white-space: nowrap;
     background: var(--line2); color: var(--muted); }
   .badge.active { background: var(--warn); color: #fff; }
+  .badge.ok { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
+  .badge.acc { background: var(--accent-soft); color: var(--accent); }
+  .badge.err { background: color-mix(in srgb, var(--err) 13%, transparent); color: var(--err); }
+  .badge.dim { background: transparent; color: var(--faint); border: 1px dashed var(--line); }
+  .summary { font-size: 12px; color: var(--muted); min-width: 0; flex: 1;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .summary b { font-weight: 600; }
   .badge.warn { background: var(--warn-soft); color: var(--warn); }
   .rule { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
   .rule input { flex: 1; min-width: 0; }
@@ -424,6 +431,7 @@
         <div class="card-head">
           <div class="titlerow">
             <h2>This machine <span class="count" id="localCount"></span></h2>
+            <span class="summary" id="localSummary"></span>
           </div>
           <select id="projectSel" onchange="loadLocal()"></select>
           <div class="search">
@@ -446,7 +454,7 @@
         <div class="card-head">
           <div class="titlerow">
             <h2>In the store <span class="count" id="storeCount"></span></h2>
-            <span class="grow" style="flex:1"></span>
+            <span class="summary" id="storeSummary"></span>
             <button class="btn ghost sm" id="refreshBtn" onclick="loadStore()">
               <span id="refreshSpin" class="spin hidden"></span><span id="refreshLbl">Refresh</span>
             </button>
@@ -805,6 +813,7 @@ async function switchStore() {
 
 function openMain() {
   selected.clear(); // a switch of store starts clean
+  storeMetas = []; storeIds = new Set(); storeLoaded = false; syncStatus = null;
   document.getElementById('main').classList.remove('hidden');
   document.getElementById('storeName2').textContent = state.store.name;
   document.getElementById('storeRepo').textContent = state.store.location;
@@ -831,11 +840,94 @@ async function loadProjects() {
 const selected = new Set();           // session ids ticked for push (survives filtering & search)
 
 let localSeq = 0; // only the latest project choice may fill the list
+let localLoading = false;
+
+// ----- Sync status: how each copy relates to the other side -----
+
+let storeLoaded = false;  // storeMetas holds the store's listing
+let storeIds = new Set();
+let syncStatus = null;    // {id: relation} seen from this machine; null while checking
+let statusSeq = 0;
+
+// What a relation means on each side. Keys are app/session relations of
+// this machine's copy to the store copy.
+const LOCAL_REL = {
+  same:     ['ok',   'Synced',         'Same messages here and in the store'],
+  ahead:    ['acc',  'Newer here',     'This machine has messages the store copy lacks — push it'],
+  behind:   ['warn', 'Newer in store', 'The store copy has messages this machine lacks — pull it'],
+  diverged: ['err',  'Diverged',       'Continued both here and on another machine — pushing or pulling with overwrite keeps one side'],
+  unknown:  ['dim',  'Can’t compare',  'The copies have no comparable entries'],
+};
+const STORE_REL = {
+  same:     LOCAL_REL.same,
+  ahead:    ['warn', 'Older than here', 'This machine has newer messages — push to update the store'],
+  behind:   ['acc',  'Newer than here', 'The store has messages this machine lacks — pull it'],
+  diverged: LOCAL_REL.diverged,
+  unknown:  LOCAL_REL.unknown,
+};
+const badge = ([cls, text, tip]) =>
+  `<span class="badge ${cls}" title="${esc(tip || '')}">${esc(text)}</span>`;
+const CHECKING = ['dim', 'Checking…', 'Comparing with the store'];
+
+// localState is a local session's sync state key, or '' while unknown.
+function localState(id) {
+  if (!storeLoaded) return '';
+  if (!storeIds.has(id)) return 'unpushed';
+  return syncStatus ? (syncStatus[id] || 'unknown') : '';
+}
+function localBadge(id) {
+  const st = localState(id);
+  if (st === 'unpushed') return badge(['acc', 'Not pushed', 'Not in the store yet']);
+  return badge(st ? LOCAL_REL[st] : CHECKING);
+}
+function storeState(id) {
+  if (!syncStatus) return '';
+  return syncStatus[id] || 'missing';
+}
+function storeBadge(id) {
+  const st = storeState(id);
+  if (st === 'missing') return badge(['dim', 'Not on this machine', 'Pull it to continue it here']);
+  return badge(st ? STORE_REL[st] : CHECKING);
+}
+
+// summarize renders counts of the states worth acting on.
+function summarize(states, labels) {
+  const n = {};
+  states.forEach(st => { n[st] = (n[st] || 0) + 1; });
+  return labels.filter(([st]) => n[st]).map(([st, text]) => `<b>${n[st]}</b> ${text}`).join(' · ');
+}
+function renderSummaries() {
+  document.getElementById('localSummary').innerHTML = localLoading ? '' : summarize(
+    localRows.map(s => localState(s.ID)),
+    [['unpushed', 'not pushed'], ['ahead', 'newer here'], ['behind', 'newer in store'], ['diverged', 'diverged']]);
+  document.getElementById('storeSummary').innerHTML = summarize(
+    storeMetas.map(m => storeState(m.session_id)),
+    [['missing', 'not on this machine'], ['behind', 'newer than here'], ['diverged', 'diverged']]);
+}
+
+// loadStatus compares this machine's sessions with the store's (after the
+// store listing is fresh) and refreshes the badges.
+async function loadStatus() {
+  const seq = ++statusSeq;
+  syncStatus = null;
+  renderLocal(); renderStore();
+  try {
+    const st = await api('/api/status');
+    if (seq !== statusSeq) return;
+    syncStatus = st;
+  } catch (e) {
+    if (seq !== statusSeq) return;
+    syncStatus = {};
+    toast('Couldn’t compare with the store: ' + e.message, true);
+  }
+  renderLocal(); renderStore();
+}
 
 async function loadLocal() {
   const slug = document.getElementById('projectSel').value;
   if (!slug) { localRows = []; renderLocal(); return; }
   const seq = ++localSeq;
+  localLoading = true;
   document.getElementById('localList').innerHTML = loadingHTML('Loading sessions…');
   document.getElementById('localCount').textContent = '';
   document.getElementById('pushBtn').disabled = true;
@@ -843,6 +935,7 @@ async function loadLocal() {
     const rows = (await api('/api/local?slug=' + encodeURIComponent(slug)))
       .sort((a, b) => new Date(b.Mtime) - new Date(a.Mtime));
     if (seq !== localSeq) return;
+    localLoading = false;
     localRows = rows;
     // Drop selections that no longer exist in this project.
     const ids = new Set(localRows.map(s => s.ID));
@@ -851,6 +944,7 @@ async function loadLocal() {
     renderLocal();
   } catch (e) {
     if (seq !== localSeq) return;
+    localLoading = false;
     document.getElementById('localList').innerHTML = `<div class="empty">Couldn’t load sessions: ${esc(e.message)}</div>`;
   }
 }
@@ -864,6 +958,8 @@ function localVisible() {
 }
 
 function renderLocal() {
+  if (localLoading) return;
+  renderSummaries();
   const list = document.getElementById('localList');
   const rows = localVisible();
   if (!localRows.length) {
@@ -876,7 +972,7 @@ function renderLocal() {
         <div class="box"></div>
         <div class="main">
           <div class="ttl"><span class="name">${esc(s.Title) || '<span class="muted">(untitled)</span>'}</span>
-            ${s.Active ? '<span class="badge active">active</span>' : ''}</div>
+            ${s.Active ? '<span class="badge active">active</span>' : ''}${localBadge(s.ID)}</div>
           <div class="sub mono">${esc(short(s.ID))}${allProjectsMode() && s.Cwd ? ' · ' + esc(s.Cwd) : ''}</div>
         </div>
         <div class="side"><div class="t">${when(s.Mtime)}</div><div class="s">${size(s.Size)}</div></div>
@@ -983,8 +1079,10 @@ async function loadStore() {
   try {
     storeMetas = (await api('/api/store'))
       .sort((a, b) => new Date(b.session_mtime) - new Date(a.session_mtime));
+    storeIds = new Set(storeMetas.map(m => m.session_id));
+    storeLoaded = true;
     document.getElementById('storeCount').textContent = storeMetas.length ? `· ${storeMetas.length}` : '';
-    renderStore();
+    loadStatus(); // renders both lists, then again with the badges
   } catch (e) {
     if (storeMetas.length) toast(e.message, true);
     else document.getElementById('storeList').innerHTML = `<div class="empty">Couldn’t load the store: ${esc(e.message)}</div>`;
@@ -1003,6 +1101,8 @@ function storeVisible() {
 }
 
 function renderStore() {
+  if (!storeLoaded) return;
+  renderSummaries();
   const list = document.getElementById('storeList');
   const metas = storeVisible();
   if (!storeMetas.length) {
@@ -1017,7 +1117,7 @@ function renderStore() {
     <div class="row store pickrow${storeSelected.has(m.session_id) ? ' on' : ''}" data-id="${esc(m.session_id)}">
       <div class="box"></div>
       <div class="main">
-        <div class="ttl"><span class="name">${esc(m.title) || '<span class="muted">(untitled)</span>'}</span></div>
+        <div class="ttl"><span class="name">${esc(m.title) || '<span class="muted">(untitled)</span>'}</span>${storeBadge(m.session_id)}</div>
         <div class="sub"><span class="mono">${esc(short(m.session_id))}</span>
           · ${esc(m.project_label || '')} · from ${esc(m.hostname || '?')}</div>
       </div>
@@ -1159,7 +1259,8 @@ async function doPullMany() {
         `<li><div class="ttl">${esc(f.title) || esc(short(f.id))}</div><div class="mono">${esc(f.error)}</div></li>`).join('') + '</ul>' : '.');
     done.classList.remove('hidden');
     toast(`Pulled ${r.pulled} session(s)` + (r.failed.length ? `, ${r.failed.length} not pulled` : ''), r.failed.length > 0);
-    if (!r.failed.length) { storeSelected.clear(); renderStore(); }
+    if (!r.failed.length) storeSelected.clear();
+    loadStatus();
   } catch (e) { stop(); toast(e.message, true); }
   busy('pmGo', 'pmSpin', false, 'pmGoLbl', 'Pulling…', 'Pull');
 }
@@ -1223,6 +1324,7 @@ async function doPull() {
       `onclick="navigator.clipboard.writeText(this.textContent);toast('Copied')">${esc(r.resume)}</code>`;
     done.classList.remove('hidden');
     toast(r.unchanged ? 'Already up to date' : 'Session installed');
+    loadStatus();
   } catch (e) { stop(); toast(e.message, true); }
   busy('pullGo', 'pullSpin', false, 'pullGoLbl', 'Pulling…', 'Pull');
 }

@@ -65,7 +65,11 @@ type Meta struct {
 	SessionMtime  time.Time `json:"session_mtime"`
 	Size          int64     `json:"size"`
 	ContentHash   string    `json:"content_hash,omitempty"` // sha256 of the uncompressed bundle
-	PushedAt      time.Time `json:"pushed_at"`
+	// Entries fingerprints the transcript's entries (session.Fingerprint),
+	// so a copy elsewhere can be found in sync without decrypting the
+	// bundle. Empty for copies pushed before ccsync 0.2.0.
+	Entries  string    `json:"entries,omitempty"`
+	PushedAt time.Time `json:"pushed_at"`
 }
 
 // Store is one store as this machine sees it.

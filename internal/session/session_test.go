@@ -411,3 +411,17 @@ func TestLongProjectPathAmbiguous(t *testing.T) {
 		t.Fatal("an unknown long path was guessed")
 	}
 }
+func TestFingerprint(t *testing.T) {
+	a := []byte("{\"type\":\"user\",\"uuid\":\"u1\",\"cwd\":\"/a\"}\n{\"type\":\"custom-title\",\"customTitle\":\"x\"}\n")
+	moved := []byte("{\"type\":\"user\",\"uuid\":\"u1\",\"cwd\":\"/b\"}\n{\"type\":\"custom-title\",\"customTitle\":\"x\"}\n")
+	more := append(append([]byte{}, a...), "{\"type\":\"user\",\"uuid\":\"u2\"}\n"...)
+	if Fingerprint(a) == "" || Fingerprint(a) != Fingerprint(moved) {
+		t.Error("copies with the same entries must share a fingerprint")
+	}
+	if Fingerprint(a) == Fingerprint(more) {
+		t.Error("a copy with more entries must have another fingerprint")
+	}
+	if Fingerprint([]byte("{\"type\":\"summary\"}\n")) != "" {
+		t.Error("a transcript without entries has no fingerprint")
+	}
+}

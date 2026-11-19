@@ -161,6 +161,12 @@ func TestFullFlow(t *testing.T) {
 		t.Fatalf("store = %+v", metas)
 	}
 
+	var status map[string]string
+	json.Unmarshal(e.call(t, "GET", "/api/status", nil, true), &status)
+	if len(status) != 1 || status[id] != "same" {
+		t.Fatalf("status = %v, want %s: same", status, id)
+	}
+
 	// Pull resolves symlinks and short names (macOS /var, Windows 8.3 temp
 	// paths); compare against the resolved form.
 	dest, err := session.ResolveProject(filepath.Join(t.TempDir(), "webapp"))

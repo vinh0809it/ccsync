@@ -422,3 +422,47 @@ func TestPushReportsProgress(t *testing.T) {
 		t.Errorf("the operation must end with the zero Progress, got %+v", last)
 	}
 }
+
+func TestStatus(t *testing.T) {
+	m, c := machine(t, testutil.Remote(t))
+	id := "77777777-aaaa-bbbb-cccc-0000000000b1"
+	s := localSession(t, m, id, `{"type":"user","uuid":"u1"}`)
+	status := func(want session.Relation, present bool) {
+		t.Helper()
+		s, err := session.Load(s.File)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := c.Status([]session.Session{s})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rel, ok := got[id]; ok != present || (present && rel != want) {
+			t.Fatalf("status = %v (present %v), want %v (present %v)", rel, ok, want, present)
+		}
+	}
+	status(0, false) // not in the store
+
+	if _, err := c.Push([]session.Session{s}, "", PushOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	status(session.Same, true)
+
+	appendLine(t, s.File, `{"type":"user","uuid":"u2"}`)
+	status(session.Ahead, true)
+
+	// The store moves on (u1, u2, u3); this machine rewinds to u1 only.
+	appendLine(t, s.File, `{"type":"user","uuid":"u3"}`)
+	if res, err := c.Push([]session.Session{s}, "", PushOptions{}); err != nil || len(res.Pushed) != 1 {
+		t.Fatalf("push: %+v %v", res, err)
+	}
+	rewrite := func(lines ...string) {
+		lines = append([]string{testutil.CwdLine(project)}, lines...)
+		testutil.WriteFile(t, s.File, strings.Join(lines, "\n")+"\n")
+	}
+	rewrite(`{"type":"user","uuid":"u1"}`)
+	status(session.Behind, true)
+
+	rewrite(`{"type":"user","uuid":"u1"}`, `{"type":"user","uuid":"u4"}`)
+	status(session.Diverged, true)
+}

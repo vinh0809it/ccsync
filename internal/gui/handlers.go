@@ -193,6 +193,31 @@ func (s *Server) handleStore(w http.ResponseWriter, r *http.Request) {
 	ok(w, metas)
 }
 
+// handleStatus relates every local session that is also in the store to
+// its store copy: {id: "same"|"ahead"|"behind"|"diverged"|"unknown"},
+// seen from this machine. Ids on one side only are absent.
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	if s.client == nil {
+		fail(w, http.StatusForbidden, errLocked)
+		return
+	}
+	locals, err := session.ListAll()
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err)
+		return
+	}
+	rels, err := s.client.Status(locals)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err)
+		return
+	}
+	out := make(map[string]string, len(rels))
+	for id, rel := range rels {
+		out[id] = rel.String()
+	}
+	ok(w, out)
+}
+
 func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 	if s.client == nil {
 		fail(w, http.StatusForbidden, errLocked)
