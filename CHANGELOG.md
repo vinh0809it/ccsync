@@ -67,7 +67,8 @@
 ### Added
 - Sync status in the GUI: every session on this machine shows whether it
   is synced, newer here, newer in the store, diverged or not pushed yet,
-  with a count of the ones to act on. Pushes record a fingerprint of the
+  with a count of the ones to act on; store sessions not on this machine
+  are marked too. Pushes record a fingerprint of the
   session's entries, so in-sync copies are recognized without decrypting.
 - Progress for push and pull: the GUI shows each step (packing, encrypting,
   syncing, uploading, pulling) with a session count; the CLI keeps a status

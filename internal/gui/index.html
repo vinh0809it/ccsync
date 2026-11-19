@@ -454,6 +454,7 @@
         <div class="card-head">
           <div class="titlerow">
             <h2>In the store <span class="count" id="storeCount"></span></h2>
+            <span class="summary" id="storeSummary"></span>
             <button class="btn ghost sm" id="refreshBtn" onclick="loadStore()">
               <span id="refreshSpin" class="spin hidden"></span><span id="refreshLbl">Refresh</span>
             </button>
@@ -812,7 +813,7 @@ async function switchStore() {
 
 function openMain() {
   selected.clear(); // a switch of store starts clean
-  storeMetas = []; storeIds = new Set(); storeLoaded = false; syncStatus = null;
+  storeMetas = []; storeIds = new Set(); storeLoaded = false; syncStatus = null; statusOk = false;
   document.getElementById('main').classList.remove('hidden');
   document.getElementById('storeName2').textContent = state.store.name;
   document.getElementById('storeRepo').textContent = state.store.location;
@@ -872,6 +873,11 @@ function localBadge(id) {
   if (st === 'unpushed') return badge(['acc', 'Not pushed', 'Not in the store yet']);
   return badge(st ? LOCAL_REL[st] : CHECKING);
 }
+// missingHere: a store session this machine doesn't have (known once the
+// status loaded, which covers every local session).
+let statusOk = false;  // syncStatus came from the server, not a failure
+const missingHere = id => statusOk && !(id in syncStatus);
+
 // summarize renders counts of the states worth acting on.
 function summarize(states, labels) {
   const n = {};
@@ -882,24 +888,26 @@ function renderSummaries() {
   document.getElementById('localSummary').innerHTML = localLoading ? '' : summarize(
     localRows.map(s => localState(s.ID)),
     [['unpushed', 'not pushed'], ['ahead', 'newer here'], ['behind', 'newer in store'], ['diverged', 'diverged']]);
+  const missing = storeMetas.filter(m => missingHere(m.session_id)).length;
+  document.getElementById('storeSummary').innerHTML = missing ? `<b>${missing}</b> not on this machine` : '';
 }
 
 // loadStatus compares this machine's sessions with the store's (after the
 // store listing is fresh) and refreshes the badges.
 async function loadStatus() {
   const seq = ++statusSeq;
-  syncStatus = null;
-  renderLocal();
+  syncStatus = null; statusOk = false;
+  renderLocal(); renderStore();
   try {
     const st = await api('/api/status');
     if (seq !== statusSeq) return;
-    syncStatus = st;
+    syncStatus = st; statusOk = true;
   } catch (e) {
     if (seq !== statusSeq) return;
     syncStatus = {};
     toast('Couldn’t compare with the store: ' + e.message, true);
   }
-  renderLocal();
+  renderLocal(); renderStore();
 }
 
 async function loadLocal() {
@@ -1096,7 +1104,8 @@ function renderStore() {
     <div class="row store pickrow${storeSelected.has(m.session_id) ? ' on' : ''}" data-id="${esc(m.session_id)}">
       <div class="box"></div>
       <div class="main">
-        <div class="ttl"><span class="name">${esc(m.title) || '<span class="muted">(untitled)</span>'}</span></div>
+        <div class="ttl"><span class="name">${esc(m.title) || '<span class="muted">(untitled)</span>'}</span>${
+          missingHere(m.session_id) ? badge(['acc', 'Not on this machine', 'Pull it to continue it here']) : ''}</div>
         <div class="sub"><span class="mono">${esc(short(m.session_id))}</span>
           · ${esc(m.project_label || '')} · from ${esc(m.hostname || '?')}</div>
       </div>
