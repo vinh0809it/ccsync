@@ -425,3 +425,30 @@ func TestFingerprint(t *testing.T) {
 		t.Error("a transcript without entries has no fingerprint")
 	}
 }
+
+// TestLoadBigTranscript: a big transcript is read at both ends, and still
+// yields the first cwd and version and the latest title.
+func TestLoadBigTranscript(t *testing.T) {
+	filler := `{"type":"assistant","message":"` + strings.Repeat("x", 4000) + `"}` + "\n"
+	title := func(s string) string { return `{"type":"custom-title","customTitle":"` + s + `"}` + "\n" }
+	head := `{"type":"user","cwd":"/home/alice/webapp","version":"2.1.0"}` + "\n"
+	cases := map[string]struct{ body, want string }{
+		"renamed later": {head + title("old") + strings.Repeat(filler, 600) + title("new") + filler, "new"},
+		// The last line alone outgrows the tail window.
+		"giant last line": {head + title("only") + strings.Repeat(filler, 400) +
+			`{"type":"user","message":"` + strings.Repeat("y", 2<<20) + `"}` + "\n", "only"},
+		// No cwd near the start: found further in.
+		"late cwd": {strings.Repeat(filler, 600) + `{"cwd":"/home/alice/webapp","version":"2.1.0"}` + "\n" +
+			strings.Repeat(filler, 400) + title("t"), "t"},
+	}
+	for name, c := range cases {
+		file := filepath.Join(t.TempDir(), "11111111-2222-3333-4444-555555555555.jsonl")
+		if err := os.WriteFile(file, []byte(c.body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		s, err := Load(file)
+		if err != nil || s.Title != c.want || s.Cwd != "/home/alice/webapp" || s.Version != "2.1.0" {
+			t.Errorf("%s: %+v %v", name, s, err)
+		}
+	}
+}

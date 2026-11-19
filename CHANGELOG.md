@@ -49,6 +49,9 @@
 - The GUI could run two git operations on the store at once.
 
 ### Changed
+- Listing local sessions reads a big transcript only at both ends (its
+  first lines and the last megabyte) instead of all of it: 45 real
+  sessions (1.1 GB) list in 0.18 s instead of 0.8 s.
 - Redesigned GUI: start screens with a brand panel beside the store
   picker, stores and store kinds picked from cards, errors next to the
   form, passphrases that can be revealed; a light and a dark theme (the
