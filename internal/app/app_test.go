@@ -353,7 +353,8 @@ func TestPullMany(t *testing.T) {
 	}
 
 	_, cb := machine(t, remote)
-	code := filepath.Join(t.TempDir(), "code")
+	// Resolved like Claude Code does (macOS /var symlink, Windows short names).
+	code, _ := session.ResolveProject(filepath.Join(t.TempDir(), "code"))
 	m := PathMap{{From: "/home/alice/dev", To: code}}
 	plan, err := cb.PlanPull(nil, m)
 	if err != nil || len(plan) != 3 {

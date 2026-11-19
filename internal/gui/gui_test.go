@@ -337,7 +337,7 @@ func TestPullManyAPI(t *testing.T) {
 	if len(plan.Plan) != 1 || plan.Plan[0].Dest != resolved || len(plan.Suggest) != 1 || plan.Suggest[0].From != "/home/zz-ghost" {
 		t.Fatalf("plan without a mapping: %+v", plan)
 	}
-	dest := filepath.Join(t.TempDir(), "code")
+	dest, _ := session.ResolveProject(filepath.Join(t.TempDir(), "code"))
 	mapping := []map[string]string{{"from": "/home/zz-ghost/dev", "to": dest}}
 	json.Unmarshal(e.call(t, "POST", "/api/pull-plan", map[string]any{"map": mapping}, true), &plan)
 	if plan.Plan[0].Dest != filepath.Join(dest, "web") {

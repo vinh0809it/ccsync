@@ -182,7 +182,7 @@ func TestPullAll(t *testing.T) {
 	if code != exitError || !strings.Contains(errOut, "--map /home/zz-ghost=") {
 		t.Fatalf("pull --all without --map: %d %q", code, errOut)
 	}
-	dest := filepath.Join(t.TempDir(), "code")
+	dest, _ := session.ResolveProject(filepath.Join(t.TempDir(), "code"))
 	plan := mustRun(t, "pull", "--all", "--dry-run", "--map", "/home/zz-ghost/dev="+dest)
 	if !strings.Contains(plan, filepath.Join(dest, "web")) || !strings.Contains(plan, filepath.Join(dest, "api")) {
 		t.Fatalf("dry run:\n%s", plan)
