@@ -49,6 +49,10 @@
 - The GUI could run two git operations on the store at once.
 
 ### Changed
+- Redesigned GUI start screens: stores to unlock and store kinds are
+  picked from cards, errors show next to the form, and passphrases can be
+  revealed. Loading states while a project or the store loads; long store
+  names no longer break the header.
 - Unlocking derives the passphrase key once; sessions are encrypted to a
   random store key. Listing 100 sessions no longer takes ~1 minute.
 - Sessions are gzipped before encryption (a real 38 MB project stored as
@@ -61,6 +65,10 @@
 - The GUI API accepts only the intended HTTP method per endpoint.
 
 ### Added
+- Progress for push and pull: the GUI shows each step (packing, encrypting,
+  syncing, uploading, pulling) with a session count; the CLI keeps a status
+  line on the terminal.
+- Delete several store sessions at once in the GUI.
 - Pull many sessions at once: `pull --all` / `pull <id>...` and **Pull
   selected** in the GUI, each to its original project path moved by folder
   mappings (`--map FROM=TO`; the GUI proposes one when the home directory

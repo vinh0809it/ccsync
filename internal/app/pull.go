@@ -35,13 +35,14 @@ func (c *Client) Pull(idPrefix, dest string, force bool) (res PullResult, err er
 }
 
 func (c *Client) pull(idPrefix, dest string, force bool) (PullResult, error) {
-	if err := c.store.Sync(); err != nil {
+	if err := c.sync(); err != nil {
 		return PullResult{}, err
 	}
 	meta, err := c.store.Find(c.key, idPrefix)
 	if err != nil {
 		return PullResult{}, err
 	}
+	c.progress("Pulling", 0, 1)
 	return c.pullMeta(meta, dest, force)
 }
 
@@ -99,7 +100,7 @@ type PlannedPull struct {
 // every session in the store.
 func (c *Client) PlanPull(ids []string, m PathMap) (plan []PlannedPull, err error) {
 	err = c.locked(func() error {
-		if err := c.store.Sync(); err != nil {
+		if err := c.sync(); err != nil {
 			return err
 		}
 		metas, _, err := c.resolve(ids)
@@ -147,7 +148,7 @@ type PullManyResult struct {
 // force applies to every session, as for Pull.
 func (c *Client) PullMany(ids []string, m PathMap, force bool) (res PullManyResult, err error) {
 	err = c.locked(func() error {
-		if err := c.store.Sync(); err != nil {
+		if err := c.sync(); err != nil {
 			return err
 		}
 		metas, unreadable, err := c.resolve(ids)
@@ -157,7 +158,8 @@ func (c *Client) PullMany(ids []string, m PathMap, force bool) (res PullManyResu
 		for _, id := range unreadable {
 			res.Failed = append(res.Failed, PullFailure{ID: id, Err: fmt.Errorf("can't be read (pushed by an outdated ccsync? run: ccsync migrate)")})
 		}
-		for _, meta := range metas {
+		for i, meta := range metas {
+			c.progress("Pulling", i, len(metas))
 			if meta.OriginalCwd == "" {
 				res.Failed = append(res.Failed, PullFailure{meta.SessionID, meta.Title,
 					fmt.Errorf("no project path was recorded — pull it on its own and choose one")})

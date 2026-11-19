@@ -18,7 +18,24 @@ func (c *cli) unlock() (*app.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return c.stores().Unlock(c.store, pass)
+	client, err := c.stores().Unlock(c.store, pass)
+	if err == nil && c.err == os.Stderr && term.IsTerminal(int(os.Stderr.Fd())) {
+		client.OnProgress = c.showProgress
+	}
+	return client, err
+}
+
+// showProgress keeps one status line on the terminal, cleared when the
+// operation ends.
+func (c *cli) showProgress(p app.Progress) {
+	switch {
+	case p.Step == "":
+		fmt.Fprint(c.err, "\r\033[K")
+	case p.Total > 0:
+		fmt.Fprintf(c.err, "\r\033[K%s %d/%d…", p.Step, p.Done, p.Total)
+	default:
+		fmt.Fprintf(c.err, "\r\033[K%s…", p.Step)
+	}
 }
 
 func (c *cli) stores() app.Stores { return app.Stores{Interactive: true} }

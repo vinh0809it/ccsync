@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/vinh0809it/ccsync/internal/app"
@@ -97,14 +98,15 @@ func (c *cli) storeCmd(args []string) error {
 		if len(reg.Stores) == 0 {
 			return store.ErrNoStore
 		}
+		tw := tabwriter.NewWriter(c.out, 0, 0, 2, ' ', 0)
 		for _, e := range reg.Stores {
 			mark := " "
 			if e.Name == reg.Current {
 				mark = "*"
 			}
-			fmt.Fprintf(c.out, "%s %-20s %-6s %s\n", mark, e.Name, kindName(e.Kind), e.Location())
+			fmt.Fprintf(tw, "%s %s\t%s\t%s\n", mark, e.Name, kindName(e.Kind), e.Location())
 		}
-		return nil
+		return tw.Flush()
 	case args[0] == "use" && len(args) == 2:
 		if err := c.stores().Use(args[1]); err != nil {
 			return err

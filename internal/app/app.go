@@ -22,6 +22,23 @@ type Client struct {
 	Entry store.Entry // which store
 	store *store.Store
 	key   *crypto.Key
+
+	// OnProgress, when set, is told how a running operation advances, and
+	// is called with the zero Progress when the operation ends.
+	OnProgress func(Progress)
+}
+
+// Progress is how far a running operation is.
+type Progress struct {
+	Step  string `json:"step"`  // what is happening, e.g. "Encrypting"
+	Done  int    `json:"done"`  // sessions finished in this step
+	Total int    `json:"total"` // 0: this step has no count
+}
+
+func (c *Client) progress(step string, done, total int) {
+	if c.OnProgress != nil {
+		c.OnProgress(Progress{step, done, total})
+	}
 }
 
 // unlockStore syncs the store and opens it with the passphrase. The caller
@@ -45,6 +62,7 @@ func (c *Client) locked(f func() error) error {
 		return err
 	}
 	defer unlock()
+	defer c.progress("", 0, 0)
 	return f()
 }
 
@@ -52,7 +70,7 @@ func (c *Client) locked(f func() error) error {
 // can't read.
 func (c *Client) List() (metas []store.Meta, unreadable []string, err error) {
 	err = c.locked(func() error {
-		if err := c.store.Sync(); err != nil {
+		if err := c.sync(); err != nil {
 			return err
 		}
 		metas, unreadable, err = c.store.List(c.key)
@@ -61,13 +79,19 @@ func (c *Client) List() (metas []store.Meta, unreadable []string, err error) {
 	return metas, unreadable, err
 }
 
+// sync brings the store up to date, reporting it as a step.
+func (c *Client) sync() error {
+	c.progress("Syncing with the store", 0, 0)
+	return c.store.Sync()
+}
+
 // publish stages changes on a freshly synced store, commits and pushes
 // them. When another machine pushes first, everything is redone on top of
 // its push. stage returns how many sessions it changed; zero means there is
 // nothing to publish. The caller holds the lock.
 func (c *Client) publish(message func(n int) string, stage func() (int, error)) error {
 	for attempt := 1; ; attempt++ {
-		if err := c.store.Sync(); err != nil {
+		if err := c.sync(); err != nil {
 			return err
 		}
 		n, err := stage()
@@ -78,6 +102,7 @@ func (c *Client) publish(message func(n int) string, stage func() (int, error)) 
 			return err
 		}
 		beforePush()
+		c.progress("Uploading to the store", 0, 0)
 		err = c.store.Push()
 		// A failed push leaves an unpublished commit that the next Sync
 		// discards, so a later run can never mistake it for published.
@@ -99,7 +124,7 @@ func (c *Client) Remove(idPrefixes []string) (removed []store.Meta, err error) {
 }
 
 func (c *Client) remove(idPrefixes []string) ([]store.Meta, error) {
-	if err := c.store.Sync(); err != nil {
+	if err := c.sync(); err != nil {
 		return nil, err
 	}
 	var targets []store.Meta

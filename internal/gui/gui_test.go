@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vinh0809it/ccsync/internal/app"
 	"github.com/vinh0809it/ccsync/internal/session"
 	"github.com/vinh0809it/ccsync/internal/testutil"
 )
@@ -359,4 +360,30 @@ func TestPullManyAPI(t *testing.T) {
 	if res.Pulled != 0 || res.Unchanged != 1 {
 		t.Fatalf("second pull-many: %+v", res)
 	}
+}
+
+// TestProgressAnswersDuringAnOperation: the page polls progress while a
+// push or pull holds the request lock, so progress must not wait for it.
+func TestProgressAnswersDuringAnOperation(t *testing.T) {
+	e := setup(t)
+	s, err := NewServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.srv = httptest.NewServer(s.Handler())
+	e.token = s.Token()
+	t.Cleanup(e.srv.Close)
+
+	s.op.Lock() // an operation is running
+	defer s.op.Unlock()
+	s.progress = app.Progress{Step: "Encrypting", Done: 3, Total: 9}
+	var p app.Progress
+	if err := json.Unmarshal(e.call(t, "GET", "/api/progress", nil, true), &p); err != nil {
+		t.Fatal(err)
+	}
+	if p != s.progress {
+		t.Fatalf("progress = %+v", p)
+	}
+	e.token = "wrong"
+	e.call(t, "GET", "/api/progress", nil, false)
 }

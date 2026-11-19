@@ -85,12 +85,18 @@ func (c *Client) push(sessions []session.Session, fallbackCwd string, opts PushO
 		}
 		fresh = append(fresh, s)
 	}
+	done := 0
 	for _, batch := range batches(fresh, batchBytes) {
-		items, err := bundleAll(batch, fallbackCwd)
+		items, err := bundleAll(batch, fallbackCwd, func(i int) {
+			c.progress("Packing", done+i, len(fresh))
+		})
 		if err != nil {
 			return total, err
 		}
-		res, err := c.pushBatch(items, opts)
+		res, err := c.pushBatch(items, opts, func(i int) {
+			c.progress("Encrypting", done+i, len(fresh))
+		})
+		done += len(batch)
 		total.Pushed = append(total.Pushed, res.Pushed...)
 		total.Skipped = append(total.Skipped, res.Skipped...)
 		total.Rejected = append(total.Rejected, res.Rejected...)
@@ -121,8 +127,9 @@ func batches(sessions []session.Session, limit int64) [][]session.Session {
 	return out
 }
 
-// pushBatch publishes one batch as one commit.
-func (c *Client) pushBatch(items []pushItem, opts PushOptions) (PushResult, error) {
+// pushBatch publishes one batch as one commit; step(i) reports that i
+// items are done.
+func (c *Client) pushBatch(items []pushItem, opts PushOptions, step func(i int)) (PushResult, error) {
 	var res PushResult
 	err := c.publish(
 		// Commit messages are world-readable on a public remote: no
@@ -130,7 +137,8 @@ func (c *Client) pushBatch(items []pushItem, opts PushOptions) (PushResult, erro
 		func(n int) string { return fmt.Sprintf("ccsync: push %d session(s)", n) },
 		func() (int, error) {
 			res = PushResult{}
-			for _, it := range items {
+			for i, it := range items {
+				step(i)
 				// An unreadable store entry (e.g. from an outdated ccsync)
 				// can't be compared; replacing it is the fix.
 				existing, found, err := c.store.Lookup(c.key, it.meta.SessionID)
@@ -184,11 +192,13 @@ func (c *Client) relationToStore(it pushItem, existing store.Meta) (session.Rela
 	return session.Compare(it.transcript, stored.Transcript), nil
 }
 
-// bundleAll reads and bundles each session.
-func bundleAll(sessions []session.Session, fallbackCwd string) ([]pushItem, error) {
+// bundleAll reads and bundles each session; step(i) reports that i are
+// done.
+func bundleAll(sessions []session.Session, fallbackCwd string, step func(i int)) ([]pushItem, error) {
 	host, _ := os.Hostname()
 	var items []pushItem
-	for _, s := range sessions {
+	for i, s := range sessions {
+		step(i)
 		contents, err := session.ReadContents(s)
 		if err != nil {
 			return nil, err

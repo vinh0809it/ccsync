@@ -69,7 +69,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, err)
 		return
 	}
-	s.client = client
+	s.setClient(client)
 	ok(w, nil)
 }
 
@@ -93,7 +93,7 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, err)
 		return
 	}
-	s.client = client
+	s.setClient(client)
 	ok(w, nil)
 }
 
@@ -120,6 +120,14 @@ func (s *Server) handleForget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ok(w, nil)
+}
+
+// handleProgress reports the running operation's progress (zero: none).
+func (s *Server) handleProgress(w http.ResponseWriter, r *http.Request) {
+	s.progMu.Lock()
+	p := s.progress
+	s.progMu.Unlock()
+	ok(w, p)
 }
 
 func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {

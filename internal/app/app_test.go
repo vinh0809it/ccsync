@@ -395,3 +395,30 @@ func TestPullMany(t *testing.T) {
 		t.Fatalf("selected pull: %+v %v", sel, err)
 	}
 }
+
+func TestPushReportsProgress(t *testing.T) {
+	m, c := machine(t, testutil.Remote(t))
+	a := localSession(t, m, "77777777-aaaa-bbbb-cccc-0000000000a1")
+	b := localSession(t, m, "77777777-aaaa-bbbb-cccc-0000000000a2")
+	var steps []Progress
+	c.OnProgress = func(p Progress) { steps = append(steps, p) }
+
+	if _, err := c.Push([]session.Session{a, b}, "", PushOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, p := range steps {
+		seen[p.Step] = true
+		if p.Total != 0 && (p.Total != 2 || p.Done < 0 || p.Done >= p.Total) {
+			t.Errorf("bad count: %+v", p)
+		}
+	}
+	for _, step := range []string{"Packing", "Syncing with the store", "Encrypting", "Uploading to the store"} {
+		if !seen[step] {
+			t.Errorf("no %q step in %+v", step, steps)
+		}
+	}
+	if last := steps[len(steps)-1]; last != (Progress{}) {
+		t.Errorf("the operation must end with the zero Progress, got %+v", last)
+	}
+}
