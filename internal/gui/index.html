@@ -179,6 +179,10 @@
   .badge { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
     letter-spacing: .03em; text-transform: uppercase; flex: none; white-space: nowrap; }
   .badge.active { background: var(--warn); color: #fff; }
+  .badge.warn { background: var(--warn-soft); color: var(--warn); }
+  .rule { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .rule input { flex: 1; min-width: 0; }
+  .rule .arrow { color: var(--faint); }
   .empty { text-align: center; color: var(--faint); padding: 40px 20px; font-size: 13.5px; }
 
   /* Store rows carry a pull button on the side */
@@ -364,7 +368,11 @@
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
             <input id="storeSearch" type="text" placeholder="Search store…" oninput="renderStore()">
           </div>
-          <p class="note">Sessions backed up in your encrypted repo. Pull one to another location to resume it there.</p>
+          <div class="toolbar">
+            <label class="selall"><input type="checkbox" id="storePickAll" onchange="toggleStoreAll(this)"> Select all</label>
+            <span class="grow"></span>
+            <button class="btn" id="pullManyBtn" onclick="openPullMany()" disabled>Pull selected</button>
+          </div>
         </div>
         <div class="card-body">
           <div id="storeList" class="rows"></div>
@@ -415,6 +423,30 @@
       <span id="pullSpin" class="spin hidden"></span><span id="pullGoLbl">Pull</span>
     </button>
     <button class="btn ghost" onclick="pullDlg.close()">Close</button>
+  </div>
+</dialog>
+
+<!-- ===== Pull several sessions ===== -->
+<dialog id="pullManyDlg">
+  <div class="dlg-head"><h2 id="pmTitle">Pull sessions</h2>
+    <p class="note" style="margin-top:6px">Each session goes to its project's path on this machine. If your
+      projects live somewhere else here, map the folders — e.g. <span class="mono">/home/alice/dev</span> →
+      <span class="mono">/Users/alice/code</span>.</p></div>
+  <div class="dlg-body">
+    <label>Folder mappings</label>
+    <div id="pmRules"></div>
+    <button class="linkbtn" onclick="addRule()">+ Add a folder mapping</button>
+    <label>Where each session goes</label>
+    <ul id="pmPlan" class="pushlist"></ul>
+    <label class="selall" style="margin-top:12px">
+      <input type="checkbox" id="pmForce"> replace local copies that are newer or were continued here (kept as .bak files)</label>
+    <div id="pmDone" class="donebox hidden"></div>
+  </div>
+  <div class="dlg-foot">
+    <button class="btn" id="pmGo" onclick="doPullMany()">
+      <span id="pmSpin" class="spin hidden"></span><span id="pmGoLbl">Pull</span>
+    </button>
+    <button class="btn ghost" onclick="pullManyDlg.close(); loadStore()">Close</button>
   </div>
 </dialog>
 
@@ -781,14 +813,15 @@ function renderStore() {
   const metas = storeVisible();
   if (!storeMetas.length) {
     list.innerHTML = '<div class="empty">Nothing here yet. Select sessions on the left and push.</div>';
-    return;
+    return syncStoreSel();
   }
   if (!metas.length) {
     list.innerHTML = '<div class="empty">No sessions match your search.</div>';
-    return;
+    return syncStoreSel();
   }
   list.innerHTML = metas.map(m => `
-    <div class="row store" data-id="${esc(m.session_id)}">
+    <div class="row store pickrow${storeSelected.has(m.session_id) ? ' on' : ''}" data-id="${esc(m.session_id)}">
+      <div class="box"></div>
       <div class="main">
         <div class="ttl"><span class="name">${esc(m.title) || '<span class="muted">(untitled)</span>'}</span></div>
         <div class="sub"><span class="mono">${esc(short(m.session_id))}</span>
@@ -800,9 +833,127 @@ function renderStore() {
     </div>`).join('');
   list.querySelectorAll('.row.store').forEach(row => {
     const m = storeMetas.find(x => x.session_id === row.dataset.id);
-    row.querySelector('[data-act="pull"]').addEventListener('click', () => openPull(m));
-    row.querySelector('[data-act="remove"]').addEventListener('click', () => doRemove(m));
+    row.querySelector('[data-act="pull"]').addEventListener('click', e => { e.stopPropagation(); openPull(m); });
+    row.querySelector('[data-act="remove"]').addEventListener('click', e => { e.stopPropagation(); doRemove(m); });
+    row.addEventListener('click', () => {
+      if (storeSelected.has(m.session_id)) storeSelected.delete(m.session_id); else storeSelected.add(m.session_id);
+      row.classList.toggle('on', storeSelected.has(m.session_id));
+      syncStoreSel();
+    });
   });
+  syncStoreSel();
+}
+
+// ----- Pull several sessions -----
+
+const storeSelected = new Set(); // store sessions ticked for pull
+let pmIds = [], pmRules = [], pmTimer = null;
+
+function syncStoreSel() {
+  const ids = new Set(storeMetas.map(m => m.session_id));
+  [...storeSelected].forEach(id => { if (!ids.has(id)) storeSelected.delete(id); });
+  const n = storeSelected.size, btn = document.getElementById('pullManyBtn');
+  btn.disabled = n === 0;
+  btn.textContent = n ? `Pull selected (${n})` : 'Pull selected';
+  const vis = storeVisible();
+  document.getElementById('storePickAll').checked = vis.length > 0 && vis.every(m => storeSelected.has(m.session_id));
+}
+
+function toggleStoreAll(box) {
+  storeVisible().forEach(m => { if (box.checked) storeSelected.add(m.session_id); else storeSelected.delete(m.session_id); });
+  renderStore();
+}
+
+// Folder mappings are remembered per store, in this browser only.
+function rulesKey() { return 'ccsync-map-' + ((state && state.store && state.store.name) || ''); }
+function savedRules() {
+  try { return JSON.parse(localStorage.getItem(rulesKey()) || 'null'); } catch { return null; }
+}
+function saveRules() {
+  try { localStorage.setItem(rulesKey(), JSON.stringify(cleanRules())); } catch {}
+}
+function cleanRules() {
+  return pmRules.map(r => ({ from: r.from.trim(), to: r.to.trim() })).filter(r => r.from && r.to);
+}
+
+async function openPullMany() {
+  pmIds = [...storeSelected];
+  pmRules = savedRules();
+  document.getElementById('pmForce').checked = false;
+  document.getElementById('pmDone').classList.add('hidden');
+  document.getElementById('pmGo').disabled = false;
+  try {
+    let r = await api('/api/pull-plan', { ids: pmIds, map: pmRules || [] });
+    if (pmRules === null) { // first time for this store: start from the suggestion
+      pmRules = r.suggest;
+      if (pmRules.length) r = await api('/api/pull-plan', { ids: pmIds, map: cleanRules() });
+    }
+    renderRules();
+    renderPlan(r.plan);
+    document.getElementById('pmTitle').textContent = `Pull ${pmIds.length} session(s)`;
+    document.getElementById('pullManyDlg').showModal();
+  } catch (e) { toast(e.message, true); }
+}
+
+function renderRules() {
+  const box = document.getElementById('pmRules');
+  box.innerHTML = pmRules.length ? pmRules.map((r, i) => `
+    <div class="rule">
+      <input type="text" class="mono" data-i="${i}" data-k="from" value="${esc(r.from)}" placeholder="/home/alice/dev" aria-label="Folder on the other machine">
+      <span class="arrow" aria-hidden="true">→</span>
+      <input type="text" class="mono" data-i="${i}" data-k="to" value="${esc(r.to)}" placeholder="/Users/alice/code" aria-label="Folder on this machine">
+      <button class="linkbtn" data-i="${i}" aria-label="Remove this mapping">Remove</button>
+    </div>`).join('') : '<p class="note">No mapping: every session goes to the same path it had on its machine.</p>';
+  box.querySelectorAll('input').forEach(inp => inp.addEventListener('input', () => {
+    pmRules[+inp.dataset.i][inp.dataset.k] = inp.value;
+    replan();
+  }));
+  box.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    pmRules.splice(+b.dataset.i, 1);
+    renderRules();
+    replan();
+  }));
+}
+
+function addRule() {
+  pmRules.push({ from: '', to: '' });
+  renderRules();
+  document.querySelector(`#pmRules input[data-i="${pmRules.length - 1}"]`).focus();
+}
+
+function replan() {
+  clearTimeout(pmTimer);
+  pmTimer = setTimeout(async () => {
+    try { renderPlan((await api('/api/pull-plan', { ids: pmIds, map: cleanRules() })).plan); }
+    catch (e) { toast(e.message, true); }
+  }, 300);
+}
+
+function renderPlan(plan) {
+  document.getElementById('pmPlan').innerHTML = plan.map(p => {
+    const notes = [];
+    if (!p.dest) notes.push('<span class="badge warn">no project path — pull it on its own</span>');
+    else if (!p.destExists) notes.push('<span class="badge warn">folder not on this machine</span>');
+    if (p.localExists) notes.push('<span class="badge">already here — will be compared</span>');
+    return `<li><div class="ttl">${esc(p.title) || '<span class="muted">(untitled)</span>'} ${notes.join(' ')}</div>
+      <div class="mono">${esc(p.dest || p.from || '')}</div></li>`;
+  }).join('');
+}
+
+async function doPullMany() {
+  busy('pmGo', 'pmSpin', true, 'pmGoLbl', 'Pulling…', 'Pull');
+  try {
+    const r = await api('/api/pull-many', { ids: pmIds, map: cleanRules(), force: document.getElementById('pmForce').checked });
+    saveRules();
+    const done = document.getElementById('pmDone');
+    done.innerHTML = `Pulled ${r.pulled}, already up to date ${r.unchanged}` +
+      (r.failed.length ? `, <b>${r.failed.length} not pulled</b>:<ul class="pushlist">` + r.failed.map(f =>
+        `<li><div class="ttl">${esc(f.title) || esc(short(f.id))}</div><div class="mono">${esc(f.error)}</div></li>`).join('') + '</ul>' : '.');
+    done.classList.remove('hidden');
+    toast(`Pulled ${r.pulled} session(s)` + (r.failed.length ? `, ${r.failed.length} not pulled` : ''), r.failed.length > 0);
+    if (!r.failed.length) { storeSelected.clear(); renderStore(); }
+  } catch (e) { toast(e.message, true); }
+  busy('pmGo', 'pmSpin', false, 'pmGoLbl', 'Pulling…', 'Pull');
 }
 
 async function doRemove(m) {

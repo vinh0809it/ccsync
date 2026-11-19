@@ -63,9 +63,19 @@ ccsync ls                        # list what's in the store
 ccsync rm <id>                   # delete a session from the store
 
 # on the other machine:
-ccsync pull <id> --to ~/dev/myproject
+ccsync pull <id> --to ~/dev/myproject        # one session, to a project you choose
 cd ~/dev/myproject && claude --resume <id>
+ccsync pull --all                             # every session, each to its original project path
+ccsync pull --all --map /home/alice/dev=/Users/alice/code   # ...where projects live elsewhere here
+ccsync pull --all --dry-run --map ...         # only show where each would go
 ```
+
+`pull --all` (or several ids) keeps each session's project path, moved by
+`--map FROM=TO` rules (repeatable; the longest match wins; it works across
+OSes, e.g. `C:\Users\alice\dev=/Users/alice/code`). If the projects came from
+a home directory that doesn't exist here, ccsync stops and suggests the
+`--map` to use. Sessions it can't install — continued here, open in Claude
+Code — are listed; the rest still go through.
 
 Sessions written to in the last 30 seconds are skipped — Claude Code may
 still be writing them (`--include-active` pushes them anyway).
@@ -82,9 +92,19 @@ ccsync                     # same as `ccsync gui`
 ccsync gui --port 8931 --no-open
 ```
 
-Pick a project (or **All projects**), tick sessions, push; pull or delete
-from the store list. The GUI and the CLI can run at the same time: they take
-turns on a store.
+Moving every session to another machine takes two clicks on each side:
+
+1. **Machine A:** pick **All projects**, tick **Select all**, **Push selected**.
+2. **Machine B:** set up the same store (for a GitHub store: **Existing git
+   repo** with the URL shown in A's header — not "New private GitHub repo"),
+   same passphrase. In **In the store**, tick **Select all**, **Pull
+   selected**. The dialog shows where each session will go; if your projects
+   live elsewhere on B, add a folder mapping (ccsync proposes one when the
+   home directory differs) and press **Pull**. Mappings are remembered per
+   store in that browser.
+
+Single sessions can be pulled (to any folder) or deleted from their row.
+The GUI and the CLI can run at the same time: they take turns on a store.
 
 ## What gets synced, and how a pull relocates it
 

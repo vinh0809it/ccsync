@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -27,7 +28,7 @@ func TestUsageAndExitCodes(t *testing.T) {
 	if code, _, errOut := run(t, "frobnicate"); code != exitUsage || !strings.Contains(errOut, "unknown command") {
 		t.Fatalf("unknown: code=%d err=%q", code, errOut)
 	}
-	if code, _, errOut := run(t, "pull", "abc"); code != exitUsage || !strings.Contains(errOut, "usage: ccsync pull") {
+	if code, _, errOut := run(t, "pull", "abc", "--all"); code != exitUsage || !strings.Contains(errOut, "usage: ccsync pull") {
 		t.Fatalf("bad pull args: code=%d err=%q", code, errOut)
 	}
 	if code, out, _ := run(t, "--version"); code != exitOK || out != "ccsync test\n" {
@@ -158,5 +159,41 @@ func TestInitFolderStore(t *testing.T) {
 	}
 	if code, _, _ := run(t, "init", "--folder", folder, "--github", "x"); code != exitUsage {
 		t.Fatalf("two locations accepted: %d", code)
+	}
+}
+
+// TestPullAll moves every session to a machine whose projects live
+// elsewhere: without --map it stops and suggests one; --dry-run shows the
+// plan; --map installs everything.
+func TestPullAll(t *testing.T) {
+	t.Setenv("CCSYNC_PASSPHRASE", "cli-test-pass")
+	remote := testutil.Remote(t)
+	a := testutil.NewMachine(t)
+	mustRun(t, "init", remote, "--name", "s")
+	for i, proj := range []string{"/home/zz-ghost/dev/web", "/home/zz-ghost/dev/api"} {
+		testutil.WriteSession(t, a.Claude, session.SlugForPath(proj), fmt.Sprintf("dddd0000-aaaa-bbbb-cccc-00000000000%d", i),
+			testutil.CwdLine(proj), fmt.Sprintf(`{"type":"user","uuid":"u%d"}`, i))
+	}
+	mustRun(t, "push", "--all-projects")
+
+	testutil.NewMachine(t)
+	mustRun(t, "init", remote, "--name", "s")
+	code, _, errOut := run(t, "pull", "--all")
+	if code != exitError || !strings.Contains(errOut, "--map /home/zz-ghost=") {
+		t.Fatalf("pull --all without --map: %d %q", code, errOut)
+	}
+	dest := filepath.Join(t.TempDir(), "code")
+	plan := mustRun(t, "pull", "--all", "--dry-run", "--map", "/home/zz-ghost/dev="+dest)
+	if !strings.Contains(plan, filepath.Join(dest, "web")) || !strings.Contains(plan, filepath.Join(dest, "api")) {
+		t.Fatalf("dry run:\n%s", plan)
+	}
+	if out := mustRun(t, "pull", "--all", "--map", "/home/zz-ghost/dev="+dest); !strings.Contains(out, "pulled 2, already up to date 0, failed 0") {
+		t.Fatalf("pull --all:\n%s", out)
+	}
+	if out := mustRun(t, "pull", "--all", "--map", "/home/zz-ghost/dev="+dest); !strings.Contains(out, "pulled 0, already up to date 2") {
+		t.Fatalf("second pull --all:\n%s", out)
+	}
+	if code, _, _ := run(t, "pull", "--all", "--to", dest); code != exitUsage {
+		t.Fatal("--all with --to accepted")
 	}
 }

@@ -290,19 +290,85 @@ func (c *cli) ls(args []string) error {
 
 func (c *cli) pull(args []string) error {
 	fs := flag.NewFlagSet("pull", flag.ContinueOnError)
-	to := fs.String("to", "", "project directory to install the session for (required)")
-	force := fs.Bool("force", false, "replace a local copy that is newer, diverged or open in Claude Code (kept as .bak files)")
-	if err := c.parseFlags(fs, args, "to"); err != nil {
+	to := fs.String("to", "", "project directory to install one session for")
+	all := fs.Bool("all", false, "pull every session in the store")
+	var maps mapFlags
+	fs.Var(&maps, "map", "move projects: FROM=TO (repeatable), e.g. /home/alice/dev=/Users/alice/code")
+	keep := fs.Bool("keep-paths", false, "install at the original project paths even if they don't exist here")
+	dryRun := fs.Bool("dry-run", false, "only show where each session would go")
+	force := fs.Bool("force", false, "replace local copies that are newer, diverged or open in Claude Code (kept as .bak files)")
+	if err := c.parseFlags(fs, args, "to", "map"); err != nil {
 		return err
 	}
-	if fs.NArg() != 1 || *to == "" {
-		return fmt.Errorf("%w: expected one session id and --to", errUsage)
+	switch {
+	case *to != "" && (fs.NArg() != 1 || *all || len(maps) > 0):
+		return fmt.Errorf("%w: --to takes exactly one session id (and no --all or --map)", errUsage)
+	case *to == "" && *all == (fs.NArg() > 0):
+		return fmt.Errorf("%w: pass session ids, or --all", errUsage)
 	}
 	client, err := c.unlock()
 	if err != nil {
 		return err
 	}
-	res, err := client.Pull(fs.Arg(0), *to, *force)
+	if *to != "" {
+		return c.pullOne(client, fs.Arg(0), *to, *force)
+	}
+
+	plan, err := client.PlanPull(fs.Args(), app.PathMap(maps))
+	if err != nil {
+		return err
+	}
+	if len(maps) == 0 && !*keep && !*dryRun {
+		// Projects from another home directory would land in folders that
+		// don't exist here: ask for a mapping instead of guessing.
+		var cwds []string
+		for _, p := range plan {
+			cwds = append(cwds, p.Meta.OriginalCwd)
+		}
+		if suggest := app.SuggestPathMap(cwds); len(suggest) > 0 {
+			var flags []string
+			for _, r := range suggest {
+				flags = append(flags, fmt.Sprintf("--map %s=%s", shellArg(r.From), shellArg(r.To)))
+			}
+			return fmt.Errorf("these sessions come from projects under %s, which doesn't exist here — say where they go, e.g.:\n  ccsync pull %s %s\n(--dry-run shows the plan; --keep-paths keeps the original paths)",
+				suggest[0].From, strings.Join(pullTargets(*all, fs.Args()), " "), strings.Join(flags, " "))
+		}
+	}
+	if *dryRun {
+		for _, p := range plan {
+			note := ""
+			switch {
+			case p.Dest == "":
+				note = "  (no project path recorded: pull it on its own with --to)"
+			case !p.DestExists:
+				note = "  (folder doesn't exist here)"
+			case p.LocalExists:
+				note = "  (already here: will be compared)"
+			}
+			fmt.Fprintf(c.out, "%s  %-28s -> %s%s\n", p.Meta.SessionID, title(p.Meta.Title), p.Dest, note)
+		}
+		return nil
+	}
+
+	res, err := client.PullMany(fs.Args(), app.PathMap(maps), *force)
+	if err != nil {
+		return err
+	}
+	for _, r := range res.Pulled {
+		fmt.Fprintf(c.out, "pulled   %s  %-28s -> %s\n", r.Meta.SessionID, title(r.Meta.Title), r.Dest)
+	}
+	for _, f := range res.Failed {
+		fmt.Fprintf(c.out, "failed   %s  %-28s — %v\n", f.ID, title(f.Title), f.Err)
+	}
+	fmt.Fprintf(c.out, "pulled %d, already up to date %d, failed %d.\n", len(res.Pulled), len(res.Unchanged), len(res.Failed))
+	if len(res.Failed) > 0 {
+		return fmt.Errorf("%d session(s) not pulled", len(res.Failed))
+	}
+	return nil
+}
+
+func (c *cli) pullOne(client *app.Client, id, to string, force bool) error {
+	res, err := client.Pull(id, to, force)
 	if err != nil {
 		return err
 	}
@@ -318,6 +384,36 @@ func (c *cli) pull(args []string) error {
 	}
 	fmt.Fprintf(c.out, "resume with:\n  %s\n", res.ResumeCommand())
 	return nil
+}
+
+// pullTargets echoes what was asked for, for a suggested command line.
+func pullTargets(all bool, ids []string) []string {
+	if all {
+		return []string{"--all"}
+	}
+	return ids
+}
+
+// mapFlags collects repeated --map FROM=TO flags.
+type mapFlags app.PathMap
+
+func (m *mapFlags) String() string { return fmt.Sprint(*m) }
+
+func (m *mapFlags) Set(s string) error {
+	r, err := app.ParseRule(s)
+	if err != nil {
+		return err
+	}
+	*m = append(*m, r)
+	return nil
+}
+
+// shellArg quotes s for a POSIX shell when needed.
+func shellArg(s string) string {
+	if strings.ContainsAny(s, " '\"$`\\") {
+		return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	}
+	return s
 }
 
 func (c *cli) rm(args []string) error {

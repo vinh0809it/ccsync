@@ -35,7 +35,7 @@ var commands = []command{
 	{"sessions", "[--project DIR]", "list local sessions of a project", (*cli).sessions},
 	{"push", "<ids...> | --all | --all-projects [--force] [--include-active] [--project DIR]", "encrypt and push sessions to the store", (*cli).push},
 	{"ls", "", "list sessions in the store", (*cli).ls},
-	{"pull", "<id> --to DIR [--force]", "install a session for project DIR", (*cli).pull},
+	{"pull", "<id> --to DIR | <ids...> | --all  [--map FROM=TO]... [--dry-run] [--force]", "install sessions here (all: at their projects, moved by --map)", (*cli).pull},
 	{"rm", "<id>...", "delete sessions from the store", (*cli).rm},
 	{"gui", "[--port N] [--no-open] [--browser]", "open the GUI (native window in desktop builds)", (*cli).gui},
 	{"migrate", "", "upgrade a store made by ccsync 0.1.x", (*cli).migrate},
