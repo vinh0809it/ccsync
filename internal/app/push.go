@@ -94,7 +94,13 @@ func (c *Client) push(sessions []session.Session, fallbackCwd string, opts PushO
 		}
 		beforePush()
 		c.progress("Uploading", 0, 0)
-		err = c.store.PushProgress(func(done, total int) { c.progress("Uploading", done, total) })
+		err = c.store.PushProgress(func(p store.UploadProgress) {
+			step := "Uploading"
+			if p.Parts > 1 {
+				step = fmt.Sprintf("Uploading part %d of %d", p.Part, p.Parts)
+			}
+			c.progress(step, p.Done, p.Total)
+		})
 		// A failed push leaves unpublished commits that the next sync
 		// discards, so a later run can never mistake them for published.
 		if err == nil || !errors.Is(err, store.ErrRemoteMoved) || attempt == publishAttempts {

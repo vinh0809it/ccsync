@@ -109,6 +109,7 @@ func (s *Server) Handler() http.Handler {
 	api("POST /api/pull-many", s.handlePullMany)
 	api("POST /api/remove", s.handleRemove)
 	api("POST /api/compact", s.handleCompact)
+	api("GET /api/history", s.handleHistory)
 	return localOnly(mux)
 }
 

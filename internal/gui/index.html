@@ -178,6 +178,11 @@ try { const t = localStorage.getItem('ccsync-theme'); if (t) document.documentEl
   .locbar .kind { color: var(--accent); flex: none; display: grid; place-items: center; }
   .locbar .where { flex: 1; min-width: 0; font-size: 13px; color: var(--ink); }
   .locbar .iconbtn { width: 30px; height: 30px; }
+  /* How big a git store's history is: a hint for when to compact */
+  .histchip { flex: none; font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+    color: var(--muted); background: var(--card2); border: 1px solid var(--line); white-space: nowrap; }
+  .histchip.warn { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
+  .histchip.err { color: var(--err); background: color-mix(in srgb, var(--err) 12%, transparent); border-color: transparent; }
   #projectSel { height: 44px; }
   select {
     width: 100%; padding: 10px 12px; border-radius: 10px; font: inherit;
@@ -664,6 +669,7 @@ try { const t = localStorage.getItem('ccsync-theme'); if (t) document.documentEl
             <span class="kind" id="storeKind2" aria-hidden="true"></span>
             <span class="where mono ell" id="storeRepo"></span>
             <button class="iconbtn" onclick="copyLocation()" title="Copy" aria-label="Copy the store location"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button>
+            <span class="histchip hidden" id="histChip"></span>
             <button class="iconbtn" id="compactBtn" onclick="compactStore()" title="Compact history — free the space old versions take" aria-label="Compact the store’s history"><span id="compactIcon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg></span></button>
             <button class="iconbtn" id="openStoreBtn" onclick="openStore()" title="Open" aria-label="Open the store"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg></button>
           </div>
@@ -896,7 +902,7 @@ const esc = s => (s || '').replace(/[&<>"']/g, c =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const when = iso => iso ? new Date(iso).toLocaleString(undefined,
   { dateStyle: 'medium', timeStyle: 'short' }) : '';
-const size = n => n >= 1<<20 ? (n/(1<<20)).toFixed(1)+' MB'
+const size = n => n >= 1<<30 ? (n/(1<<30)).toFixed(1)+' GB' : n >= 1<<20 ? (n/(1<<20)).toFixed(1)+' MB'
   : n >= 1024 ? (n/1024).toFixed(1)+' KB' : n+' B';
 const short = id => (id || '').slice(0, 8);
 
@@ -1056,6 +1062,21 @@ async function copyLocation() {
   toast('Copied');
 }
 
+// loadHistory shows how big the store's git history is, warning as it
+// nears what git hosts like (GitHub recommends repos under 1 GB).
+async function loadHistory() {
+  const chip = document.getElementById('histChip');
+  let h = null;
+  try { h = await api('/api/history'); } catch {}
+  chip.classList.toggle('hidden', !h);
+  if (!h) return;
+  chip.textContent = 'History ' + size(h.bytes);
+  chip.className = 'histchip' + (h.bytes >= 1 << 30 ? ' err' : h.bytes >= 500 << 20 ? ' warn' : '');
+  chip.title = `${h.commits} commit(s), ${size(h.bytes)} in this machine’s copy. ` +
+    (h.bytes >= 500 << 20 ? 'GitHub recommends repos under 1 GB — consider compacting the history.'
+      : 'Compacting frees what replaced and deleted versions take.');
+}
+
 async function compactStore() {
   const yes = await askConfirm('Compact the store’s history?',
     '<p>Every overwrite and delete leaves the old version in the store repo’s git history, so the repo ' +
@@ -1075,6 +1096,7 @@ async function compactStore() {
     const r = await api('/api/compact', {});
     toast(r.commits <= 1 ? 'The history is already a single commit'
       : `Compacted ${r.commits} commits into 1 — this machine’s copy went from ${size(r.before)} to ${size(r.after)}`);
+    loadHistory();
   } catch (e) { toast(e.message, true); }
   btn.disabled = false;
   icon.innerHTML = idle;
@@ -1356,6 +1378,7 @@ async function loadStore() {
     storeLoaded = true;
     document.getElementById('storeCount').textContent = storeMetas.length ? String(storeMetas.length) : '';
     loadStatus(); // renders both lists, then again with the badges
+    loadHistory();
   } catch (e) {
     if (storeMetas.length) toast(e.message, true);
     else document.getElementById('storeList').innerHTML = `<div class="empty">Couldn’t load the store: ${esc(e.message)}</div>`;

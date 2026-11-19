@@ -75,15 +75,17 @@
 - `ccsync compact --yes` (and a button in the GUI) replaces a git store's
   history with a single commit of its current sessions, freeing the space
   that replaced and deleted versions take. A push it hasn't seen is never
-  overwritten; other machines follow the new history by themselves.
+  overwritten; other machines follow the new history by themselves. The
+  GUI shows the history's size next to it, amber from 500 MB and red from
+  1 GB.
 - Sync status in the GUI: every session on this machine shows whether it
   is synced, newer here, newer in the store, diverged or not pushed yet,
   with a count of the ones to act on; store sessions not on this machine
   are marked too. Pushes record a fingerprint of the
   session's entries, so in-sync copies are recognized without decrypting.
 - Progress for push and pull. A push runs in two steps, each counted:
-  encrypting every session, then uploading them all at once (git's file
-  count); the GUI shows the step and count, the CLI keeps a status line on
+  encrypting every session, then uploading them (git's file count), at
+  most 5 commits per git push; the GUI shows the step and count, the CLI keeps a status line on
   the terminal.
 - Delete several store sessions at once in the GUI.
 - Pull many sessions at once: `pull --all` / `pull <id>...` and **Pull

@@ -184,18 +184,69 @@ func containsPath(list, p string) bool {
 
 // push publishes the current branch with an explicit refspec (independent
 // of the user's push.default) and sets its upstream.
-func (g gitTransport) push(progress func(done, total int)) error {
-	var err error
+//
+// With progress set, the unpublished commits go up pushCommits at a time,
+// so one push never carries more than a few batches of data; each push
+// that succeeds stays published even if a later one fails.
+func (g gitTransport) push(progress func(UploadProgress)) error {
 	if progress == nil {
-		_, err = g.git("push", "--quiet", "-u", "origin", "HEAD")
-	} else {
-		err = g.gitProgress(progress, "push", "--progress", "-u", "origin", "HEAD")
+		_, err := g.git("push", "--quiet", "-u", "origin", "HEAD")
+		return remoteMoved(err)
 	}
+	ends := []string{"HEAD"}
+	upstream, err := g.git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+	branch, ok := strings.CutPrefix(upstream, "origin/")
+	if err == nil && ok {
+		list, err := g.git("rev-list", "--reverse", "@{u}..HEAD")
+		if err != nil {
+			return err
+		}
+		commits := strings.Fields(list)
+		ends = nil
+		for i := pushCommits; i < len(commits); i += pushCommits {
+			ends = append(ends, commits[i-1]+":refs/heads/"+branch)
+		}
+		ends = append(ends, "HEAD")
+	}
+	for i, end := range ends {
+		err := g.gitProgress(func(done, total int) {
+			progress(UploadProgress{Part: i + 1, Parts: len(ends), Done: done, Total: total})
+		}, "push", "--progress", "-u", "origin", end)
+		if err != nil {
+			return remoteMoved(err)
+		}
+	}
+	return nil
+}
+
+// pushCommits is how many commits one push carries at most.
+const pushCommits = 5
+
+// UploadProgress is how far a push is: part Part of Parts, Done of Total
+// files (git objects) uploaded in this part.
+type UploadProgress struct{ Part, Parts, Done, Total int }
+
+// remoteMoved marks a push rejected because another machine pushed first.
+func remoteMoved(err error) error {
 	if err != nil && (strings.Contains(err.Error(), "fetch first") ||
 		strings.Contains(err.Error(), "non-fast-forward")) {
 		return fmt.Errorf("%w: %v", ErrRemoteMoved, err)
 	}
 	return err
+}
+
+// History is how much a git store's history holds.
+func (g gitTransport) history() (History, error) {
+	count, err := g.git("rev-list", "--count", "HEAD")
+	if err != nil {
+		return History{}, err
+	}
+	n, err := strconv.Atoi(count)
+	if err != nil {
+		return History{}, err
+	}
+	size, err := g.historySize()
+	return History{Commits: n, Bytes: size}, err
 }
 
 // writingObjects matches git's upload progress: "Writing objects:  45% (9/20)".

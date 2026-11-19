@@ -224,9 +224,18 @@ func (s *Store) Commit(message string) error { return s.t.commit(message) }
 // machine pushed first, in which case the caller re-syncs and retries.
 func (s *Store) Push() error { return s.t.push(nil) }
 
-// PushProgress is Push, telling progress how many files are uploaded of
-// how many (git's object count) as it goes.
-func (s *Store) PushProgress(progress func(done, total int)) error { return s.t.push(progress) }
+// PushProgress is Push, telling progress how the upload advances.
+func (s *Store) PushProgress(progress func(UploadProgress)) error { return s.t.push(progress) }
+
+// History is the size of a git store's history (see Store.History).
+type History struct {
+	Commits int   `json:"commits"`
+	Bytes   int64 `json:"bytes"` // this machine's clone; the remote's is about the same
+}
+
+// History reports how much the store's history holds, to tell when
+// Compact is worth it. ErrNoHistory for a synced folder.
+func (s *Store) History() (History, error) { return s.t.history() }
 
 // Compact replaces the store's history with a single commit holding its
 // current files, so replaced and deleted versions stop taking space. Old

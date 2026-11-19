@@ -205,6 +205,12 @@ func TestFullFlow(t *testing.T) {
 		t.Fatalf("store after remove = %+v", metas)
 	}
 
+	var hist struct{ Commits int }
+	json.Unmarshal(e.call(t, "GET", "/api/history", nil, true), &hist)
+	if hist.Commits < 2 {
+		t.Fatalf("history = %+v", hist)
+	}
+
 	// Compacting folds the history (setup, pushes, removal) into one commit.
 	var compacted struct{ Commits int }
 	json.Unmarshal(e.call(t, "POST", "/api/compact", map[string]any{}, true), &compacted)

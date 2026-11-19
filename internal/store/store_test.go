@@ -513,3 +513,42 @@ func TestCompact(t *testing.T) {
 		t.Fatalf("folder store compact: %v", err)
 	}
 }
+
+// TestPushInParts: unpublished commits go up a few at a time, each part
+// reporting its progress, and History counts them.
+func TestPushInParts(t *testing.T) {
+	remote := testutil.Remote(t)
+	st := machine(t)
+	key := open(t, st, remote)
+	for i := 0; i < 12; i++ {
+		put(t, st, key, fmt.Sprintf("58585858-aaaa-bbbb-cccc-%012d", i), "x")
+		if err := st.Commit("test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var parts []int
+	err := st.PushProgress(func(p UploadProgress) {
+		if p.Parts != 3 || p.Done > p.Total {
+			t.Errorf("progress %+v", p)
+		}
+		if len(parts) == 0 || parts[len(parts)-1] != p.Part {
+			parts = append(parts, p.Part)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(parts) != "[1 2 3]" {
+		t.Fatalf("parts = %v", parts)
+	}
+	if testutil.Git(t, remote, "rev-parse", "HEAD") != testutil.Git(t, st.Dir, "rev-parse", "HEAD") {
+		t.Fatal("remote is not at the clone's HEAD")
+	}
+	h, err := st.History()
+	if err != nil || h.Commits != 13 || h.Bytes <= 0 {
+		t.Fatalf("history = %+v %v", h, err)
+	}
+	if _, err := Open(Entry{Name: "f", Kind: KindFolder, Dir: t.TempDir()}).History(); !errors.Is(err, ErrNoHistory) {
+		t.Fatalf("folder history: %v", err)
+	}
+}

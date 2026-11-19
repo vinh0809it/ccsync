@@ -132,6 +132,15 @@ func (c *Client) Compact() (r store.CompactResult, err error) {
 	return r, err
 }
 
+// History reports the size of the store's history (see store.Store.History).
+func (c *Client) History() (h store.History, err error) {
+	err = c.locked(func() error {
+		h, err = c.store.History()
+		return err
+	})
+	return h, err
+}
+
 // Remove deletes sessions, given by (possibly abbreviated) ids, from the
 // store. Local copies are untouched; a git store's history keeps old
 // versions.

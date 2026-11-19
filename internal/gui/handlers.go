@@ -117,6 +117,25 @@ func (s *Server) handleCompact(w http.ResponseWriter, r *http.Request) {
 	ok(w, res)
 }
 
+// handleHistory reports the size of a git store's history; null for a
+// synced folder, which keeps none.
+func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
+	if s.client == nil {
+		fail(w, http.StatusForbidden, errLocked)
+		return
+	}
+	h, err := s.client.History()
+	if errors.Is(err, store.ErrNoHistory) {
+		ok(w, nil)
+		return
+	}
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err)
+		return
+	}
+	ok(w, h)
+}
+
 // handleOpen opens the unlocked store's web page or folder. What to open
 // comes from the store's registry entry, never from the request.
 func (s *Server) handleOpen(w http.ResponseWriter, r *http.Request) {
