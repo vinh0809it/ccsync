@@ -468,12 +468,21 @@ try { const t = localStorage.getItem('ccsync-theme'); if (t) document.documentEl
   .facts dd { margin: 0; min-width: 0; word-break: break-all; display: flex; gap: 6px; align-items: center; }
   .facts .iconbtn { width: 24px; height: 24px; flex: none; }
   .sect { font-size: 12px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); margin: 16px 0 8px; }
-  .msgs { display: flex; flex-direction: column; gap: 8px; padding-bottom: 6px; }
-  .msg { padding: 10px 12px; border-radius: 12px; font-size: 13px; line-height: 1.5; white-space: pre-wrap;
-    word-break: break-word; border: 1px solid var(--line2); background: var(--card2); max-width: 92%; }
-  .msg.user { align-self: flex-end; background: var(--accent-soft); border-color: transparent; }
-  .msg .who { display: block; font-size: 11px; font-weight: 700; color: var(--muted); margin-bottom: 3px; }
-  .msg.user .who { color: var(--accent); }
+  .msgs { display: flex; flex-direction: column; gap: 10px; padding-bottom: 6px; }
+  .msg { display: grid; grid-template-columns: 28px 1fr; gap: 10px; align-items: start; }
+  .msg .av { width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center;
+    font-size: 12px; font-weight: 800; color: #fff; background: #64748b; }
+  .msg.user .av { background: linear-gradient(135deg, var(--accent), var(--accent2)); }
+  .msg .bubble { min-width: 0; padding: 9px 12px; border-radius: 4px 12px 12px 12px; cursor: pointer;
+    background: var(--card); border: 1px solid var(--line); }
+  .msg.user .bubble { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+  .msg .who { display: flex; gap: 8px; align-items: baseline; font-size: 12px; font-weight: 700; color: var(--ink); margin-bottom: 3px; }
+  .msg .who time { font-weight: 500; color: var(--faint); font-size: 11.5px; }
+  .msg .txt { font-size: 13px; line-height: 1.5; color: var(--ink); white-space: pre-wrap; word-break: break-word;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
+  .msg.open .txt { display: block; }
+  .msg .more { font-size: 11.5px; color: var(--accent); margin-top: 2px; display: none; }
+  .msg.clipped .more { display: block; }
   .pushlist { list-style: none; padding: 0; margin: 8px 0; }
   .pushlist li { padding: 9px 12px; border-radius: 10px; background: var(--card2);
     border: 1px solid var(--line2); margin-bottom: 6px; }
@@ -1676,9 +1685,22 @@ async function openInfo(from, x) {
   document.getElementById('infoDlg').showModal();
   try {
     const msgs = await api(`/api/preview?from=${local ? 'local' : 'store'}&id=${encodeURIComponent(id)}`);
-    box.innerHTML = msgs.length ? msgs.map(m => `<div class="msg ${m.role === 'user' ? 'user' : ''}">` +
-      `<span class="who">${m.role === 'user' ? 'You' : 'Claude'}${m.time ? ' · ' + esc(when(m.time)) : ''}</span>${esc(m.text)}</div>`).join('')
-      : '<div class="empty">No messages to show.</div>';
+    box.innerHTML = msgs.length ? msgs.map(m => {
+      const user = m.role === 'user';
+      return `<div class="msg${user ? ' user' : ''}"><span class="av" aria-hidden="true">${user ? 'Y' : 'C'}</span>` +
+        `<div class="bubble"><div class="who">${user ? 'You' : 'Claude'}${m.time ? `<time>${esc(when(m.time))}</time>` : ''}</div>` +
+        `<div class="txt">${esc(m.text)}</div><div class="more">Show more</div></div></div>`;
+    }).join('') : '<div class="empty">No messages to show.</div>';
+    // Long messages show 3 lines; a click opens or closes one.
+    box.querySelectorAll('.msg').forEach(el => {
+      const txt = el.querySelector('.txt');
+      el.classList.toggle('clipped', txt.scrollHeight > txt.clientHeight + 1);
+      el.querySelector('.bubble').onclick = () => {
+        if (!el.classList.contains('clipped')) return;
+        const open = el.classList.toggle('open');
+        el.querySelector('.more').textContent = open ? 'Show less' : 'Show more';
+      };
+    });
   } catch (e) { box.innerHTML = `<div class="empty">Couldn’t read the messages: ${esc(e.message)}</div>`; }
 }
 

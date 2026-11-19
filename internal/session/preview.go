@@ -18,7 +18,7 @@ type Message struct {
 }
 
 // previewChars caps one previewed message.
-const previewChars = 600
+const previewChars = 400
 
 // Preview returns the last n user and assistant texts of a transcript.
 // Tool calls and results, thinking, and wrapped command or system text
