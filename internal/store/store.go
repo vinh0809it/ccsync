@@ -59,7 +59,7 @@ var (
 // CompactResult is what Compact did.
 type CompactResult struct {
 	Commits int   `json:"commits"` // in the history before; 1 means it was already compact
-	Before  int64 `json:"before"`  // bytes the local clone's history took
+	Before  int64 `json:"before"`  // bytes the local clone's history took; -1: unknown (a partial clone)
 	After   int64 `json:"after"`
 }
 
@@ -78,7 +78,11 @@ type Meta struct {
 	// Entries fingerprints the transcript's entries (session.Fingerprint),
 	// so a copy elsewhere can be found in sync without decrypting the
 	// bundle. Empty for copies pushed before ccsync 0.2.0.
-	Entries  string    `json:"entries,omitempty"`
+	Entries string `json:"entries,omitempty"`
+	// EntrySet records the entries themselves (session.EntrySet), so how a
+	// changed copy relates to this one needs no download either. Empty for
+	// copies pushed before it existed.
+	EntrySet string    `json:"entry_set,omitempty"`
 	PushedAt time.Time `json:"pushed_at"`
 	// Preview holds the session's last messages, so they show without
 	// downloading the bundle. Empty for copies pushed before it existed.
@@ -240,6 +244,17 @@ type History struct {
 // History reports how much the store's history holds, to tell when
 // Compact is worth it. ErrNoHistory for a synced folder.
 func (s *Store) History() (History, error) { return s.t.history() }
+
+// Prefetch downloads the bundles of the sessions ids in one go, ahead of
+// reading them (a git store's clone has none until read).
+func (s *Store) Prefetch(ids []string) error {
+	for _, id := range ids {
+		if err := checkID(id); err != nil {
+			return err
+		}
+	}
+	return s.t.prefetch(ids)
+}
 
 // Compact replaces the store's history with a single commit holding its
 // current files, so replaced and deleted versions stop taking space. Old

@@ -25,12 +25,37 @@ var sparsePatterns = []string{"/*", "!/" + sessionsDir + "/*/data.age*"}
 // lazy makes the clone check out only what sparsePatterns allow. It is a
 // no-op once set; an older clone with every bundle checked out drops them
 // from its working tree (they stay in git).
+//
+// A clone made by an older ccsync is full; it also becomes partial from
+// here on: later fetches skip blobs, and bundles come when read.
 func (g gitTransport) lazy() error {
+	if p, _ := g.git("config", "--get", "remote.origin.promisor"); p != "true" {
+		for _, kv := range [][2]string{{"remote.origin.promisor", "true"}, {"remote.origin.partialclonefilter", "blob:none"}} {
+			if _, err := g.git("config", kv[0], kv[1]); err != nil {
+				return err
+			}
+		}
+	}
 	if on, _ := g.git("config", "--get", "core.sparseCheckout"); on == "true" {
 		return nil
 	}
 	_, err := g.git(append([]string{"sparse-checkout", "set", "--no-cone"}, sparsePatterns...)...)
 	return err
+}
+
+// dropStrayParts removes bundle files from the working tree. Bundles live
+// there only between Put and commit; one left by a failed run must never
+// be committed later.
+func (g gitTransport) dropStrayParts() error {
+	stray, err := filepath.Glob(g.s.path(sessionsDir, "*", "data.age*"))
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, f := range stray {
+		errs = append(errs, os.Remove(f))
+	}
+	return errors.Join(errs...)
 }
 
 // isPart reports whether a file name is a bundle part.
@@ -91,6 +116,49 @@ func (g gitTransport) openPart(id, name string) (io.ReadCloser, error) {
 		return nil, err
 	}
 	return &gitBlob{ReadCloser: out, cmd: cmd, stderr: &stderr}, nil
+}
+
+// prefetch downloads the bundle blobs of ids that the clone lacks, in one
+// fetch (reading them one by one costs a round trip each).
+func (g gitTransport) prefetch(ids []string) error {
+	var paths []string
+	for _, id := range ids {
+		paths = append(paths, sessionsDir+"/"+id+"/")
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	// What the current tree lacks (--no-walk: not the history), listed
+	// without fetching it...
+	out, err := g.git("rev-list", "--objects", "--missing=print", "--no-object-names", "--no-walk", "HEAD")
+	if err != nil {
+		return err
+	}
+	absent := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		if oid, ok := strings.CutPrefix(line, "?"); ok {
+			absent[oid] = true
+		}
+	}
+	// ...narrowed to these sessions' bundles.
+	staged, err := g.git(append([]string{"ls-files", "-s", "--"}, paths...)...)
+	if err != nil {
+		return err
+	}
+	var missing []string
+	for _, line := range strings.Split(staged, "\n") {
+		fields := strings.Fields(line) // <mode> <oid> <stage> <path>
+		if len(fields) == 4 && absent[fields[1]] && isPart(path.Base(fields[3])) {
+			missing = append(missing, fields[1])
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	// The fetch git itself makes for missing objects of a partial clone.
+	_, err = g.git(append([]string{"-c", "fetch.negotiationAlgorithm=noop", "fetch", "--quiet", "--no-tags",
+		"--no-write-fetch-head", "--recurse-submodules=no", "--filter=blob:none", "origin"}, missing...)...)
+	return err
 }
 
 // gitBlob is a blob streamed out of git; Close reports git's failure.
@@ -154,7 +222,11 @@ func (g gitTransport) stageParts() error {
 		if err != nil {
 			return err
 		}
-		rel := filepath.ToSlash(strings.TrimPrefix(f, g.s.Dir+string(filepath.Separator)))
+		rel, err := filepath.Rel(g.s.Dir, f)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
 		if _, err := g.git("update-index", "--add", "--cacheinfo", "100644,"+sha+","+rel); err != nil {
 			return err
 		}

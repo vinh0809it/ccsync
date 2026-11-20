@@ -51,11 +51,13 @@ func (c *Client) Status(ctx context.Context, locals []session.Session) (map[stri
 				out[s.ID] = hit.rel
 				continue
 			}
-			// Status never downloads a bundle: a copy without a fingerprint
-			// (pushed by an older ccsync) stays Unknown until a push records
-			// one.
+			// Status never downloads a bundle: it compares with the
+			// metadata's record of entries. A copy pushed before that record
+			// existed stays Unknown (unless plainly in sync) until a push
+			// adds it.
 			rel := session.Unknown
-			if transcript, err := os.ReadFile(s.File); err == nil && meta.Entries != "" {
+			if transcript, err := os.ReadFile(s.File); err == nil && (meta.EntrySet != "" ||
+				(meta.Entries != "" && session.Fingerprint(transcript) == meta.Entries)) {
 				if r, err := c.compareWithStore(transcript, meta); err == nil {
 					rel = r
 				}

@@ -147,11 +147,12 @@ func (c *Client) stagePush(sessions []session.Session, fallbackCwd string, opts 
 	// backfill completes the metadata of a store copy that is in sync but
 	// was pushed before fingerprints or previews were recorded, so status
 	// and previews never need its bundle. The bundle stays as it is.
-	backfill := func(existing store.Meta, entries string, preview []session.Message) error {
-		if existing.Entries != "" && len(existing.Preview) > 0 {
+	backfill := func(existing store.Meta, transcript []byte) error {
+		if existing.Entries != "" && existing.EntrySet != "" && len(existing.Preview) > 0 {
 			return nil
 		}
-		existing.Entries, existing.Preview = entries, preview
+		existing.Entries, existing.EntrySet = session.Fingerprint(transcript), session.EntrySet(transcript)
+		existing.Preview, _ = session.Preview(bytes.NewReader(transcript), PreviewMessages)
 		if err := c.store.PutMeta(c.key, existing); err != nil {
 			return err
 		}
@@ -163,11 +164,8 @@ func (c *Client) stagePush(sessions []session.Session, fallbackCwd string, opts 
 		if existing, found, err := c.store.Lookup(c.key, s.ID); err == nil && found && existing.Entries != "" {
 			if transcript, err := os.ReadFile(s.File); err == nil && session.Fingerprint(transcript) == existing.Entries {
 				res.Skipped = append(res.Skipped, s.ID)
-				if len(existing.Preview) == 0 {
-					preview, _ := session.Preview(bytes.NewReader(transcript), PreviewMessages)
-					if err := backfill(existing, existing.Entries, preview); err != nil {
-						return res, 0, err
-					}
+				if err := backfill(existing, transcript); err != nil {
+					return res, 0, err
 				}
 				continue
 			}
@@ -186,7 +184,7 @@ func (c *Client) stagePush(sessions []session.Session, fallbackCwd string, opts 
 		found = found && err == nil
 		if found && existing.ContentHash == it.meta.ContentHash {
 			res.Skipped = append(res.Skipped, it.meta.SessionID)
-			if err := backfill(existing, it.meta.Entries, it.meta.Preview); err != nil {
+			if err := backfill(existing, it.transcript); err != nil {
 				return res, 0, err
 			}
 			continue
@@ -201,7 +199,7 @@ func (c *Client) stagePush(sessions []session.Session, fallbackCwd string, opts 
 				// The copies differ only in relocated paths or bookkeeping,
 				// e.g. a session pulled to another path and not continued.
 				res.Skipped = append(res.Skipped, it.meta.SessionID)
-				if err := backfill(existing, it.meta.Entries, it.meta.Preview); err != nil {
+				if err := backfill(existing, it.transcript); err != nil {
 					return res, 0, err
 				}
 				continue
@@ -231,6 +229,9 @@ func (c *Client) stagePush(sessions []session.Session, fallbackCwd string, opts 
 func (c *Client) compareWithStore(transcript []byte, meta store.Meta) (session.Relation, error) {
 	if meta.Entries != "" && session.Fingerprint(transcript) == meta.Entries {
 		return session.Same, nil
+	}
+	if meta.EntrySet != "" {
+		return session.CompareSet(transcript, meta.EntrySet), nil
 	}
 	payload, err := c.store.OpenPayload(c.key, meta.SessionID)
 	if err != nil {
@@ -271,6 +272,7 @@ func bundle(s session.Session, fallbackCwd, host string) (pushItem, error) {
 		Size:          s.Size,
 		ContentHash:   hash,
 		Entries:       session.Fingerprint(contents.Transcript),
+		EntrySet:      session.EntrySet(contents.Transcript),
 		Preview:       preview,
 	}}, nil
 }

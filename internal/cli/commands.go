@@ -464,8 +464,12 @@ func (c *cli) compact(args []string) error {
 		fmt.Fprintln(c.out, "The store's history is already a single commit.")
 		return nil
 	}
-	fmt.Fprintf(c.out, "Compacted %d commits into 1; this clone's history went from %s to %s.\n",
-		r.Commits, humanSize(r.Before), humanSize(r.After))
+	if r.Before < 0 {
+		fmt.Fprintf(c.out, "Compacted %d commits into 1.\n", r.Commits)
+	} else {
+		fmt.Fprintf(c.out, "Compacted %d commits into 1; this clone's history went from %s to %s.\n",
+			r.Commits, humanSize(r.Before), humanSize(r.After))
+	}
 	fmt.Fprintln(c.out, "The git host may take a while to reclaim the space of the old history.")
 	return nil
 }

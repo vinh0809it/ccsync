@@ -1134,7 +1134,7 @@ async function compactStore() {
   try {
     const r = await api('/api/compact', {});
     toast(r.commits <= 1 ? 'The history is already a single commit'
-      : `Compacted ${r.commits} commits into 1 — this machine’s copy went from ${size(r.before)} to ${size(r.after)}`);
+      : `Compacted ${r.commits} commits into 1` + (r.before >= 0 ? ` — this machine’s copy went from ${size(r.before)} to ${size(r.after)}` : ''));
   } catch (e) { toast(e.message, true); }
   btn.disabled = false;
   icon.innerHTML = idle;

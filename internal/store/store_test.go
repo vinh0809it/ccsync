@@ -119,7 +119,7 @@ func TestNothingReadableInRemote(t *testing.T) {
 
 	// The working tree holds the uncompressed blobs; git objects in the
 	// remote are compressed but checked too.
-	for _, root := range []string{st.path(sessionsDir), remote} {
+	for _, root := range []string{st.path(sessionsDir), testutil.RemoteDir(remote)} {
 		for _, marker := range []string{"MARKER_SECRET_CONTENT", "MARKER_SECRET_TITLE", "MARKER_HOSTNAME", "topsecret", "alice"} {
 			if grepTree(t, root, marker) {
 				t.Fatalf("plaintext %q found under %s", marker, root)
@@ -574,6 +574,9 @@ func TestBundlesLoadLazily(t *testing.T) {
 	if parts, _ := filepath.Glob(b.path(sessionsDir, "*", "data.age*")); len(parts) != 0 {
 		t.Fatalf("a new clone checked out bundles: %v", parts)
 	}
+	if n := testutil.MissingObjects(t, b.Dir); n < 3 { // both bundles' parts
+		t.Fatalf("clone has %d missing objects: not partial", n)
+	}
 	if metas, _, err := b.List(keyB); err != nil || len(metas) != 2 {
 		t.Fatalf("list without bundles: %d %v", len(metas), err)
 	}
@@ -617,5 +620,93 @@ func TestBundlesLoadLazily(t *testing.T) {
 	}
 	if data, err := payload(t, a, keyA, big); err != nil || string(data) != "now small" {
 		t.Fatalf("after converting the clone: %q %v", data, err)
+	}
+}
+
+// TestSyncDropsUnpublishedBundles: a bundle written but never committed
+// (a push that failed midway) must not survive a sync, or a later commit
+// would publish it under metadata it doesn't match.
+func TestSyncDropsUnpublishedBundles(t *testing.T) {
+	remote := testutil.Remote(t)
+	st := machine(t)
+	key := open(t, st, remote)
+	id := "59595959-aaaa-bbbb-cccc-000000000001"
+	put(t, st, key, id, "published")
+	publish(t, st)
+	put(t, st, key, id, "never published")
+	if err := st.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	if parts, _ := filepath.Glob(st.path(sessionsDir, id, "data.age*")); len(parts) != 0 {
+		t.Fatalf("unpublished bundle left after sync: %v", parts)
+	}
+	if data, err := payload(t, st, key, id); err != nil || string(data) != "published" {
+		t.Fatalf("payload after sync: %q %v", data, err)
+	}
+	put(t, st, key, "59595959-aaaa-bbbb-cccc-000000000002", "other")
+	publish(t, st)
+	if data, err := payload(t, st, key, id); err != nil || string(data) != "published" {
+		t.Fatalf("payload after an unrelated push: %q %v", data, err)
+	}
+}
+
+// TestOlderCloneBecomesPartial: a full clone (made by an older ccsync)
+// stops downloading bundles it doesn't read.
+func TestOlderCloneBecomesPartial(t *testing.T) {
+	remote := testutil.Remote(t)
+	a := machine(t)
+	keyA := open(t, a, remote)
+	put(t, a, keyA, "60606060-aaaa-bbbb-cccc-000000000001", "first")
+	publish(t, a)
+
+	old := machine(t)
+	testutil.Git(t, "", "clone", "-q", remote, old.Dir) // full, every bundle checked out
+	if err := old.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	put(t, a, keyA, "60606060-aaaa-bbbb-cccc-000000000002", "second")
+	publish(t, a)
+	if err := old.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	if n := testutil.MissingObjects(t, old.Dir); n == 0 {
+		t.Fatal("the converted clone downloaded the new bundle")
+	}
+	key, err := old.Unlock(pass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, err := payload(t, old, key, "60606060-aaaa-bbbb-cccc-000000000002"); err != nil || string(data) != "second" {
+		t.Fatalf("read after conversion: %q %v", data, err)
+	}
+}
+
+// TestPrefetch: one fetch brings exactly the asked sessions' current
+// bundles — not other sessions', not old versions.
+func TestPrefetch(t *testing.T) {
+	remote := testutil.Remote(t)
+	a := machine(t)
+	keyA := open(t, a, remote)
+	one, two := "61616161-aaaa-bbbb-cccc-000000000001", "61616161-aaaa-bbbb-cccc-000000000002"
+	put(t, a, keyA, one, "old version")
+	publish(t, a)
+	put(t, a, keyA, one, "current")
+	put(t, a, keyA, two, "other")
+	publish(t, a)
+
+	b := machine(t)
+	keyB := open(t, b, remote)
+	before := testutil.MissingObjects(t, b.Dir)
+	if err := b.Prefetch([]string{one}); err != nil {
+		t.Fatal(err)
+	}
+	if got := before - testutil.MissingObjects(t, b.Dir); got != 1 {
+		t.Fatalf("prefetch brought %d objects, want 1", got)
+	}
+	if data, err := payload(t, b, keyB, one); err != nil || string(data) != "current" {
+		t.Fatalf("payload = %q %v", data, err)
+	}
+	if err := b.Prefetch([]string{one}); err != nil { // nothing left to fetch
+		t.Fatal(err)
 	}
 }

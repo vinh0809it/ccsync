@@ -50,14 +50,16 @@
 
 ### Changed
 - A git store's clone holds only the sessions' metadata: setting up a
-  machine, opening the GUI and listing the store download no session
-  data (a real 630 MB store: 4 s instead of 2.5 min). A session's data is
-  downloaded when it is pulled, or when a status check has to compare a
-  changed copy. Existing clones switch over on their next sync.
-- Pushes record a preview of the last messages in the metadata, so store
-  previews need no download; a push also adds the fingerprint and preview
-  to in-sync copies pushed by older versions, without re-uploading them.
-  Until then such copies show "?" instead of being downloaded to compare.
+  machine, opening the GUI, listing the store, sync status and previews
+  download no session data (a real 630 MB store sets up in 4 s instead of
+  2.5 min). A session's data is downloaded when it is pulled — one fetch
+  for all sessions of a pull — or when a push has to compare against a
+  copy pushed by an older version. Clones made by older versions switch
+  over on their next sync.
+- Pushes record in the metadata what the session holds (its entries) and
+  a preview of its last messages; a push also adds them to in-sync copies
+  pushed by older versions, without re-uploading those. Until then such
+  copies show "?" rather than being downloaded to compare.
 - "Active" means the transcript itself changed in the last 30 s; files a
   pull writes no longer make every pulled session look active, and pulled
   companion files keep their original times.

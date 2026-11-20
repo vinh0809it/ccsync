@@ -281,12 +281,17 @@ func TestPushOverUnreadableStoreCopy(t *testing.T) {
 	testutil.Git(t, c.Entry.Dir, "push", "-q")
 	appendLine(t, bad.File, `{"type":"user","uuid":"u2"}`)
 
+	// The metadata says the local copy is ahead, so the broken bundle is
+	// simply replaced; the bundle itself never had to be read.
 	res, err := c.Push([]session.Session{bad, good}, "", PushOptions{})
-	if err != nil || len(res.Rejected) != 1 || res.Rejected[0].Relation != session.Unknown || len(res.Pushed) != 1 {
-		t.Fatalf("push with an unreadable store copy: %+v %v", res, err)
+	if err != nil || len(res.Rejected) != 0 || len(res.Pushed) != 2 {
+		t.Fatalf("push over a broken bundle: %+v %v", res, err)
 	}
-	if res, err := c.Push([]session.Session{bad}, "", PushOptions{Overwrite: true}); err != nil || len(res.Pushed) != 1 {
-		t.Fatalf("overwrite: %+v %v", res, err)
+	if _, err := c.Preview(bad.ID); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := c.Pull(bad.ID, t.TempDir(), true); err != nil || res.Target == "" {
+		t.Fatalf("pull after the repair: %+v %v", res, err)
 	}
 }
 
@@ -544,5 +549,31 @@ func TestPushBackfillsMetadata(t *testing.T) {
 	}
 	if remote := testutil.Git(t, c.Entry.Dir, "rev-parse", "@{u}"); remote != testutil.Git(t, c.Entry.Dir, "rev-parse", "HEAD") {
 		t.Fatal("backfill not published")
+	}
+}
+
+// TestStatusDownloadsNothing: status relates changed copies from the
+// metadata alone; the clone fetches no bundle for it.
+func TestStatusDownloadsNothing(t *testing.T) {
+	remote := testutil.Remote(t)
+	a, clientA := machine(t, remote)
+	id := "72727272-aaaa-bbbb-cccc-000000000001"
+	s := localSession(t, a, id, `{"type":"user","uuid":"u1"}`)
+	if _, err := clientA.Push([]session.Session{s}, "", PushOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	b, clientB := machine(t, remote)
+	local := localSession(t, b, id, `{"type":"user","uuid":"u1"}`, `{"type":"user","uuid":"u2"}`)
+	missing := testutil.MissingObjects(t, clientB.Entry.Dir)
+	if missing == 0 {
+		t.Fatal("clone is not partial")
+	}
+	rels, err := clientB.Status(context.Background(), []session.Session{local})
+	if err != nil || rels[id] != session.Ahead {
+		t.Fatalf("status = %v %v", rels, err)
+	}
+	if got := testutil.MissingObjects(t, clientB.Entry.Dir); got != missing {
+		t.Fatalf("status downloaded %d object(s)", missing-got)
 	}
 }

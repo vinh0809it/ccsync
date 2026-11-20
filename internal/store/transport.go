@@ -32,6 +32,8 @@ type transport interface {
 	parts(id string) ([]string, error)
 	// openPart opens one of them; a git store downloads it if needed.
 	openPart(id, name string) (io.ReadCloser, error)
+	// prefetch downloads the bundles of several sessions at once.
+	prefetch(ids []string) error
 	// compact drops the shared history (see Store.Compact).
 	compact() (CompactResult, error)
 	// forget removes what this machine keeps of the store — never the
@@ -105,6 +107,8 @@ func (folderTransport) history() (History, error)       { return History{}, ErrN
 
 // forget leaves the folder alone: it is the shared store itself.
 func (folderTransport) forget() error { return nil }
+
+func (folderTransport) prefetch([]string) error { return nil } // nothing to download
 
 func (f folderTransport) parts(id string) ([]string, error) { return diskParts(f.s, id) }
 

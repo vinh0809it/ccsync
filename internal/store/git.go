@@ -132,8 +132,10 @@ func (g gitTransport) sync() error {
 	if _, err := g.git("reset", "--hard", "--quiet", "@{u}"); err != nil {
 		return err
 	}
-	_, err := g.git("clean", "-fdq")
-	return err
+	if _, err := g.git("clean", "-fdq"); err != nil {
+		return err
+	}
+	return g.dropStrayParts()
 }
 
 // upstreamIsStore reports whether the fetched upstream holds a store marker.
@@ -265,9 +267,6 @@ func (g gitTransport) history() (History, error) {
 	if err != nil {
 		return History{}, err
 	}
-	if partial, _ := g.git("config", "--get", "remote.origin.promisor"); partial == "true" {
-		return History{Commits: n, Bytes: -1}, nil
-	}
 	size, err := g.historySize()
 	return History{Commits: n, Bytes: size}, err
 }
@@ -373,8 +372,12 @@ func (g gitTransport) compact() (CompactResult, error) {
 	return r, err
 }
 
-// historySize is how many bytes the clone's git objects take.
+// historySize is how many bytes the clone's git objects take; -1 for a
+// partial clone, which holds only part of the history.
 func (g gitTransport) historySize() (int64, error) {
+	if partial, _ := g.git("config", "--get", "remote.origin.promisor"); partial == "true" {
+		return -1, nil
+	}
 	out, err := g.git("count-objects", "-v")
 	if err != nil {
 		return 0, err
