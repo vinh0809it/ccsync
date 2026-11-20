@@ -39,8 +39,32 @@ func (g gitTransport) lazy() error {
 	if on, _ := g.git("config", "--get", "core.sparseCheckout"); on == "true" {
 		return nil
 	}
-	_, err := g.git(append([]string{"sparse-checkout", "set", "--no-cone"}, sparsePatterns...)...)
-	return err
+	// Set up by hand rather than with `git sparse-checkout set --no-cone`,
+	// which git before 2.36 lacks.
+	file, err := g.git("rev-parse", "--git-path", "info/sparse-checkout")
+	if err != nil {
+		return err
+	}
+	if !filepath.IsAbs(file) {
+		file = filepath.Join(g.s.Dir, file)
+	}
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(file, []byte(strings.Join(sparsePatterns, "\n")+"\n"), 0o644); err != nil {
+		return err
+	}
+	for _, kv := range [][2]string{{"core.sparseCheckoutCone", "false"}, {"core.sparseCheckout", "true"}} {
+		if _, err := g.git("config", kv[0], kv[1]); err != nil {
+			return err
+		}
+	}
+	// Apply it to the checkout; the reset that follows in sync and open
+	// brings everything else in line.
+	if _, err := g.git("rev-parse", "--verify", "--quiet", "HEAD"); err == nil {
+		_, _ = g.git("read-tree", "-mu", "HEAD")
+	}
+	return nil
 }
 
 // dropStrayParts removes bundle files from the working tree. Bundles live

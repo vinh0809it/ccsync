@@ -63,6 +63,9 @@ type CompactResult struct {
 	After   int64 `json:"after"`
 }
 
+// MetaVersion marks metadata that records Entries, EntrySet and Preview.
+const MetaVersion = 1
+
 // Meta is the per-session metadata blob (stored encrypted).
 type Meta struct {
 	SessionID     string    `json:"session_id"`
@@ -87,6 +90,9 @@ type Meta struct {
 	// Preview holds the session's last messages, so they show without
 	// downloading the bundle. Empty for copies pushed before it existed.
 	Preview []session.Message `json:"preview,omitempty"`
+	// Version is the MetaVersion the metadata was written with; 0 for
+	// copies pushed before it existed.
+	Version int `json:"meta_version,omitempty"`
 }
 
 // Store is one store as this machine sees it.

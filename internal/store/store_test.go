@@ -710,3 +710,39 @@ func TestPrefetch(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestCompactFromLazyClone: a machine that never downloaded a bundle can
+// compact; the bundles stay intact for everyone.
+func TestCompactFromLazyClone(t *testing.T) {
+	remote := testutil.Remote(t)
+	a := machine(t)
+	keyA := open(t, a, remote)
+	id := "62626262-aaaa-bbbb-cccc-000000000001"
+	put(t, a, keyA, id, "v1")
+	publish(t, a)
+	put(t, a, keyA, id, "v2")
+	publish(t, a)
+
+	b := machine(t)
+	open(t, b, remote)
+	if testutil.MissingObjects(t, b.Dir) == 0 {
+		t.Fatal("clone is not partial")
+	}
+	if r, err := b.Compact(); err != nil || r.Commits < 2 {
+		t.Fatalf("compact = %+v %v", r, err)
+	}
+	if n := testutil.Git(t, remote, "rev-list", "--count", "HEAD"); n != "1" {
+		t.Fatalf("remote has %s commits", n)
+	}
+	if err := a.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := payload(t, a, keyA, id); err != nil || string(data) != "v2" {
+		t.Fatalf("after compact: %q %v", data, err)
+	}
+	c := machine(t)
+	keyC := open(t, c, remote)
+	if data, err := payload(t, c, keyC, id); err != nil || string(data) != "v2" {
+		t.Fatalf("fresh clone after compact: %q %v", data, err)
+	}
+}

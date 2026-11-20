@@ -148,9 +148,10 @@ func (c *Client) stagePush(sessions []session.Session, fallbackCwd string, opts 
 	// was pushed before fingerprints or previews were recorded, so status
 	// and previews never need its bundle. The bundle stays as it is.
 	backfill := func(existing store.Meta, transcript []byte) error {
-		if existing.Entries != "" && existing.EntrySet != "" && len(existing.Preview) > 0 {
-			return nil
+		if existing.Version >= store.MetaVersion {
+			return nil // already records all of it (an empty preview included)
 		}
+		existing.Version = store.MetaVersion
 		existing.Entries, existing.EntrySet = session.Fingerprint(transcript), session.EntrySet(transcript)
 		existing.Preview, _ = session.Preview(bytes.NewReader(transcript), PreviewMessages)
 		if err := c.store.PutMeta(c.key, existing); err != nil {
@@ -274,5 +275,6 @@ func bundle(s session.Session, fallbackCwd, host string) (pushItem, error) {
 		Entries:       session.Fingerprint(contents.Transcript),
 		EntrySet:      session.EntrySet(contents.Transcript),
 		Preview:       preview,
+		Version:       store.MetaVersion,
 	}}, nil
 }

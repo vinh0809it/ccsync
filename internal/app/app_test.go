@@ -524,7 +524,7 @@ func TestPushBackfillsMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	meta, _, _ := c.store.Lookup(c.key, s.ID)
-	meta.Entries, meta.Preview = "", nil // as an older ccsync pushed it
+	meta.Entries, meta.EntrySet, meta.Preview, meta.Version = "", "", nil, 0 // as an older ccsync pushed it
 	if err := c.store.PutMeta(c.key, meta); err != nil {
 		t.Fatal(err)
 	}
@@ -575,5 +575,37 @@ func TestStatusDownloadsNothing(t *testing.T) {
 	}
 	if got := testutil.MissingObjects(t, clientB.Entry.Dir); got != missing {
 		t.Fatalf("status downloaded %d object(s)", missing-got)
+	}
+}
+
+// TestBackfillOnceAndStatusUpdates: after the backfill, status sees the
+// copy in sync (no stale cached "?"), and later pushes leave it alone even
+// when it has nothing to preview.
+func TestBackfillOnceAndStatusUpdates(t *testing.T) {
+	m, c := machine(t, testutil.Remote(t))
+	s := localSession(t, m, "73737373-aaaa-bbbb-cccc-000000000001", `{"type":"user","uuid":"u1"}`) // no text
+	if _, err := c.Push([]session.Session{s}, "", PushOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	meta, _, _ := c.store.Lookup(c.key, s.ID)
+	meta.Entries, meta.EntrySet, meta.Preview, meta.Version = "", "", nil, 0 // as an older ccsync pushed it
+	c.store.PutMeta(c.key, meta)
+	c.store.Commit("old")
+	c.store.Push()
+	if rels, _ := c.Status(context.Background(), []session.Session{s}); rels[s.ID] != session.Unknown {
+		t.Fatalf("before backfill: %v", rels[s.ID])
+	}
+	if _, err := c.Push([]session.Session{s}, "", PushOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if rels, _ := c.Status(context.Background(), []session.Session{s}); rels[s.ID] != session.Same {
+		t.Fatalf("after backfill: %v", rels[s.ID])
+	}
+	head := testutil.Git(t, c.Entry.Dir, "rev-parse", "HEAD")
+	if _, err := c.Push([]session.Session{s}, "", PushOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if testutil.Git(t, c.Entry.Dir, "rev-parse", "HEAD") != head {
+		t.Fatal("a push of an in-sync session committed again")
 	}
 }

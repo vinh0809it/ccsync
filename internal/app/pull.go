@@ -164,9 +164,7 @@ func (c *Client) PullMany(ids []string, m PathMap, force bool) (res PullManyResu
 		for _, m := range metas {
 			want = append(want, m.SessionID)
 		}
-		if err := c.store.Prefetch(want); err != nil {
-			return err
-		}
+		_ = c.store.Prefetch(want) // only a speed-up: each read downloads what's still missing
 		for i, meta := range metas {
 			c.progress("Pulling", i, len(metas))
 			if meta.OriginalCwd == "" {
