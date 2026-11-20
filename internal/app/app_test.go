@@ -138,6 +138,11 @@ func TestPullRelocatesWholeSession(t *testing.T) {
 	s := localSession(t, a, id,
 		testutil.CwdLine(project+"/api"),
 		`{"content":"saved to: `+testutil.JSONString(filepath.Join(sdir, "tool-results", "r.txt"))+`"}`)
+	old := time.Now().Add(-time.Hour)
+	for _, f := range []string{s.File, filepath.Join(sdir, "subagents", "agent-x.jsonl"), filepath.Join(sdir, "tool-results", "r.txt")} {
+		os.Chtimes(f, old, old)
+	}
+	s, _ = session.Load(s.File)
 	if _, err := clientA.Push([]session.Session{s}, "", PushOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -165,6 +170,10 @@ func TestPullRelocatesWholeSession(t *testing.T) {
 	}
 	if b, err := os.ReadFile(filepath.Join(newDir, "subagents", "agent-x.jsonl")); err != nil || !strings.Contains(string(b), testutil.JSONString(res.Dest)) {
 		t.Errorf("subagent transcript missing or not relocated: %s %v", b, err)
+	}
+	// A pull is no sign of a running session: nothing pulled looks active.
+	if pulled, err := session.Load(res.Target); err != nil || IsActive(pulled) || time.Since(pulled.Mtime) < time.Minute {
+		t.Errorf("pulled session looks active: %+v %v", pulled, err)
 	}
 	if res, err := clientB.Pull("aaaaaaaa", dest, false); err != nil || !res.Unchanged {
 		t.Fatalf("re-pull: %+v %v", res, err)

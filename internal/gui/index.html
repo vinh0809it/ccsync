@@ -279,6 +279,10 @@ try { const t = localStorage.getItem('ccsync-theme'); if (t) document.documentEl
   .filterchip:hover { color: var(--accent); border-color: var(--accent); }
   .filterchip.on { color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent); }
   .badge.warn { background: var(--warn-soft); color: var(--warn); }
+  .mapbox { padding: 12px 14px; border-radius: 12px; background: var(--card2); border: 1px solid var(--line2); margin-top: 6px; }
+  .maphead { display: flex; align-items: flex-start; gap: 12px; justify-content: space-between; margin-bottom: 8px; }
+  .maphead b { display: block; font-size: 13.5px; }
+  .maphead .btn { flex: none; }
   .rule { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
   .rule input { flex: 1; min-width: 0; }
   .rule .arrow { color: var(--faint); }
@@ -781,13 +785,14 @@ try { const t = localStorage.getItem('ccsync-theme'); if (t) document.documentEl
 <!-- ===== Pull several sessions ===== -->
 <dialog id="pullManyDlg">
   <div class="dlg-head"><h2 id="pmTitle">Pull sessions</h2>
-    <p class="note" style="margin-top:6px">Each session goes to its project's path on this machine. If your
-      projects live somewhere else here, map the folders — e.g. <span class="mono">/home/alice/dev</span> →
-      <span class="mono">/Users/alice/code</span>.</p></div>
+    <p class="note" style="margin-top:6px">Check where each session goes, then pull. Nothing is pulled before you press Pull.</p></div>
   <div class="dlg-body">
-    <label>Folder mappings</label>
-    <div id="pmRules"></div>
-    <button class="linkbtn" onclick="addRule()">+ Add a folder mapping</button>
+    <div class="mapbox">
+      <div class="maphead"><div><b>Folder mappings</b>
+        <span class="note">For projects kept in a different folder here, e.g. <span class="mono">~/dev</span> → <span class="mono">~/code</span>.</span></div>
+        <button class="btn ghost sm" onclick="addRule()">+ Map a folder</button></div>
+      <div id="pmRules"></div>
+    </div>
     <label>Where each session goes</label>
     <ul id="pmPlan" class="pushlist"></ul>
     <label class="selall" style="margin-top:12px">
@@ -1108,8 +1113,10 @@ async function copyText(text) {
 async function compactStore() {
   let h = null;
   try { h = await api('/api/history'); } catch {}
-  const now = h ? `<p class="histnow${h.bytes >= 500 << 20 ? ' big' : ''}">Now: <b>${h.commits} commit(s)</b>, ` +
-    `<b>${size(h.bytes)}</b> of history` + (h.bytes >= 500 << 20 ? ' — GitHub recommends repos under 1 GB.' : '.') + '</p>' : '';
+  const big = h && h.bytes >= 500 << 20;
+  const now = h ? `<p class="histnow${big ? ' big' : ''}">Now: <b>${h.commits} commit(s)</b>` +
+    (h.bytes >= 0 ? `, <b>${size(h.bytes)}</b> of history` : ' of history') +
+    (big ? ' — GitHub recommends repos under 1 GB.' : '.') + '</p>' : '';
   const yes = await askConfirm('Compact the store’s history?', now +
     '<p>Every overwrite and delete leaves the old version in the store repo’s git history, so the repo ' +
     'only grows. Compacting rewrites that history as one commit of what the store holds now.</p>' +
@@ -1567,7 +1574,7 @@ function renderRules() {
       <span class="arrow" aria-hidden="true">→</span>
       <input type="text" class="mono" data-i="${i}" data-k="to" value="${esc(r.to)}" placeholder="/Users/alice/code" aria-label="Folder on this machine">
       <button class="linkbtn" data-i="${i}" aria-label="Remove this mapping">Remove</button>
-    </div>`).join('') : '<p class="note">No mapping: every session goes to the same path it had on its machine.</p>';
+    </div>`).join('') : '<p class="note">None — every session goes to the path it had on the other machine.</p>';
   box.querySelectorAll('input').forEach(inp => inp.addEventListener('input', () => {
     pmRules[+inp.dataset.i][inp.dataset.k] = inp.value;
     replan();

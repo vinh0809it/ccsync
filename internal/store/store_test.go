@@ -545,7 +545,7 @@ func TestPushInParts(t *testing.T) {
 		t.Fatal("remote is not at the clone's HEAD")
 	}
 	h, err := st.History()
-	if err != nil || h.Commits != 13 || h.Bytes <= 0 {
+	if err != nil || h.Commits != 13 || h.Bytes == 0 { // -1: a partial clone
 		t.Fatalf("history = %+v %v", h, err)
 	}
 	if _, err := Open(Entry{Name: "f", Kind: KindFolder, Dir: t.TempDir()}).History(); !errors.Is(err, ErrNoHistory) {

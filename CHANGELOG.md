@@ -49,6 +49,12 @@
 - The GUI could run two git operations on the store at once.
 
 ### Changed
+- A git store is cloned without its history's data (a partial clone), so
+  setting up a machine downloads only the current sessions.
+- "Active" means the transcript itself changed in the last 30 s; files a
+  pull writes no longer make every pulled session look active, and pulled
+  companion files keep their original times.
+- The pull dialog shows folder mappings in their own box with a button.
 - Pushing a session the store already has in sync no longer packs or
   encrypts it (the fingerprint recorded at push tells).
 - Listing local sessions reads a big transcript only at both ends (its

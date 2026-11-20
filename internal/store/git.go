@@ -62,7 +62,10 @@ func (g gitTransport) open(repoURL string) error {
 		if err := os.MkdirAll(filepath.Dir(g.s.Dir), 0o700); err != nil {
 			return err
 		}
-		if _, err := g.gitIn(".", "clone", "--quiet", "--", repoURL, g.s.Dir); err != nil {
+		// A partial clone: the old versions in the history are never
+		// needed here, so their data isn't downloaded (hosts without
+		// partial-clone support send everything, as before).
+		if _, err := g.gitIn(".", "clone", "--quiet", "--filter=blob:none", "--", repoURL, g.s.Dir); err != nil {
 			return err
 		}
 	} else {
@@ -235,7 +238,8 @@ func remoteMoved(err error) error {
 	return err
 }
 
-// History is how much a git store's history holds.
+// History is how much a git store's history holds. A partial clone holds
+// only part of it locally, so its size is unknown (-1) there.
 func (g gitTransport) history() (History, error) {
 	count, err := g.git("rev-list", "--count", "HEAD")
 	if err != nil {
@@ -244,6 +248,9 @@ func (g gitTransport) history() (History, error) {
 	n, err := strconv.Atoi(count)
 	if err != nil {
 		return History{}, err
+	}
+	if partial, _ := g.git("config", "--get", "remote.origin.promisor"); partial == "true" {
+		return History{Commits: n, Bytes: -1}, nil
 	}
 	size, err := g.historySize()
 	return History{Commits: n, Bytes: size}, err

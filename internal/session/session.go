@@ -35,6 +35,7 @@ type Session struct {
 	Title   string
 	Version string    // Claude Code version that wrote it
 	Mtime   time.Time // newest modification of the transcript or companion files
+	Written time.Time // the transcript's own: Claude Code appends to it while the session runs
 	Size    int64     // transcript plus companion files
 }
 
@@ -57,7 +58,7 @@ func Load(file string) (Session, error) {
 	if err != nil {
 		return s, err
 	}
-	s.Mtime, s.Size = info.ModTime(), info.Size()
+	s.Mtime, s.Written, s.Size = info.ModTime(), info.ModTime(), info.Size()
 	_ = walkCompanion(s.Dir, func(_ string, fi os.FileInfo) error {
 		s.Size += fi.Size()
 		if fi.ModTime().After(s.Mtime) {
@@ -89,7 +90,7 @@ func Load(file string) (Session, error) {
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
 			return s, err
 		}
-		s = Session{ID: s.ID, File: s.File, Dir: s.Dir, Mtime: s.Mtime, Size: s.Size}
+		s = Session{ID: s.ID, File: s.File, Dir: s.Dir, Mtime: s.Mtime, Written: s.Written, Size: s.Size}
 		err := s.scanMeta(f)
 		return s, err
 	}

@@ -17,6 +17,11 @@ import (
 // half-written session by accident.
 const ActiveGrace = 30 * time.Second
 
+// IsActive reports whether Claude Code may still be writing s: its
+// transcript changed within ActiveGrace. Companion files don't count — a
+// pull writes them, and that is no sign of a running session.
+func IsActive(s session.Session) bool { return time.Since(s.Written) < ActiveGrace }
+
 // PushOptions relax Push's safety checks.
 type PushOptions struct {
 	// IncludeActive pushes sessions modified within ActiveGrace.
@@ -80,7 +85,7 @@ func (c *Client) push(sessions []session.Session, fallbackCwd string, opts PushO
 		if err != nil && s.Mtime.IsZero() {
 			return PushResult{}, err // unreadable; a parse problem alone still pushes
 		}
-		if time.Since(s.Mtime) < ActiveGrace && !opts.IncludeActive {
+		if IsActive(s) && !opts.IncludeActive {
 			active = append(active, s)
 			continue
 		}

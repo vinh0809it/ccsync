@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/vinh0809it/ccsync/internal/app"
 	"github.com/vinh0809it/ccsync/internal/crypto"
@@ -262,7 +261,7 @@ func (s *Server) handleLocal(w http.ResponseWriter, r *http.Request) {
 	}
 	rows := make([]row, 0, len(sessions))
 	for _, s := range sessions {
-		rows = append(rows, row{s, time.Since(s.Mtime) < app.ActiveGrace})
+		rows = append(rows, row{s, app.IsActive(s)})
 	}
 	ok(w, rows)
 }

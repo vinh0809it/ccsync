@@ -230,7 +230,7 @@ func (s *Store) PushProgress(progress func(UploadProgress)) error { return s.t.p
 // History is the size of a git store's history (see Store.History).
 type History struct {
 	Commits int   `json:"commits"`
-	Bytes   int64 `json:"bytes"` // this machine's clone; the remote's is about the same
+	Bytes   int64 `json:"bytes"` // this machine's clone (about the remote's); -1: unknown, a partial clone
 }
 
 // History reports how much the store's history holds, to tell when

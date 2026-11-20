@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
-	"time"
 
 	"github.com/vinh0809it/ccsync/internal/app"
 	"github.com/vinh0809it/ccsync/internal/gui"
@@ -140,7 +139,7 @@ func (c *cli) sessions(args []string) error {
 	sort.Slice(sessions, func(i, j int) bool { return sessions[i].Mtime.After(sessions[j].Mtime) })
 	for _, s := range sessions {
 		live := ""
-		if time.Since(s.Mtime) < app.ActiveGrace {
+		if app.IsActive(s) {
 			live = "  [active]"
 		}
 		fmt.Fprintf(c.out, "%s  %s  %7s  %s%s\n",
