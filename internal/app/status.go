@@ -51,8 +51,11 @@ func (c *Client) Status(ctx context.Context, locals []session.Session) (map[stri
 				out[s.ID] = hit.rel
 				continue
 			}
+			// Status never downloads a bundle: a copy without a fingerprint
+			// (pushed by an older ccsync) stays Unknown until a push records
+			// one.
 			rel := session.Unknown
-			if transcript, err := os.ReadFile(s.File); err == nil {
+			if transcript, err := os.ReadFile(s.File); err == nil && meta.Entries != "" {
 				if r, err := c.compareWithStore(transcript, meta); err == nil {
 					rel = r
 				}

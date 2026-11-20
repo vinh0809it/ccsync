@@ -232,7 +232,7 @@ func TestSyncRecoversDirtyClone(t *testing.T) {
 		t.Fatal(err)
 	}
 	put(t, st, key, "77777777-aaaa-bbbb-cccc-000000000002", "staged")
-	testutil.Git(t, st.Dir, "add", "-A")
+	testutil.Git(t, st.Dir, "add", "-A", "--sparse") // bundles are outside the checkout
 	os.WriteFile(st.path("stray.txt"), []byte("junk"), 0o644)
 	os.WriteFile(st.path(markerFile), []byte("garbage"), 0o644)
 
@@ -550,5 +550,72 @@ func TestPushInParts(t *testing.T) {
 	}
 	if _, err := Open(Entry{Name: "f", Kind: KindFolder, Dir: t.TempDir()}).History(); !errors.Is(err, ErrNoHistory) {
 		t.Fatalf("folder history: %v", err)
+	}
+}
+
+// TestBundlesLoadLazily: a clone checks out only metadata; bundles are
+// read from git on demand, and rewriting or removing a session leaves no
+// stale bundle part in the store.
+func TestBundlesLoadLazily(t *testing.T) {
+	remote := testutil.Remote(t)
+	a := machine(t)
+	keyA := open(t, a, remote)
+	big, small := "57575757-bbbb-bbbb-cccc-000000000001", "57575757-bbbb-bbbb-cccc-000000000002"
+	bigData := strings.Repeat("x", partSize+123) // two parts
+	put(t, a, keyA, big, bigData)
+	put(t, a, keyA, small, "small")
+	publish(t, a)
+	if parts, _ := filepath.Glob(a.path(sessionsDir, "*", "data.age*")); len(parts) != 0 {
+		t.Fatalf("bundles left in the checkout after a commit: %v", parts)
+	}
+
+	b := machine(t)
+	keyB := open(t, b, remote)
+	if parts, _ := filepath.Glob(b.path(sessionsDir, "*", "data.age*")); len(parts) != 0 {
+		t.Fatalf("a new clone checked out bundles: %v", parts)
+	}
+	if metas, _, err := b.List(keyB); err != nil || len(metas) != 2 {
+		t.Fatalf("list without bundles: %d %v", len(metas), err)
+	}
+	if data, err := payload(t, b, keyB, big); err != nil || string(data) != bigData {
+		t.Fatalf("lazy read: len %d, %v", len(data), err)
+	}
+
+	// B shrinks the big session to one part and removes the small one.
+	put(t, b, keyB, big, "now small")
+	if _, err := b.Remove(small); err != nil {
+		t.Fatal(err)
+	}
+	publish(t, b)
+	files := testutil.RemoteFiles(t, remote)
+	if strings.Contains(files, big+"/data.age.1") || strings.Contains(files, small) {
+		t.Fatalf("stale bundle files in the store:\n%s", files)
+	}
+	if !strings.Contains(files, big+"/data.age") {
+		t.Fatalf("bundle missing from the store:\n%s", files)
+	}
+	if err := a.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := payload(t, a, keyA, big); err != nil || string(data) != "now small" {
+		t.Fatalf("machine A after B's rewrite: %q %v", data, err)
+	}
+	if out := testutil.Git(t, a.Dir, "status", "--porcelain"); out != "" {
+		t.Fatalf("clone dirty: %q", out)
+	}
+	// A clone made by an older ccsync has every bundle checked out; the
+	// next sync drops them from the checkout, losing nothing.
+	testutil.Git(t, a.Dir, "sparse-checkout", "disable")
+	if _, err := os.Stat(a.path(sessionsDir, big, "data.age")); err != nil {
+		t.Fatal("full checkout expected")
+	}
+	if err := a.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(a.path(sessionsDir, big, "data.age")); !os.IsNotExist(err) {
+		t.Fatal("bundle still checked out after sync")
+	}
+	if data, err := payload(t, a, keyA, big); err != nil || string(data) != "now small" {
+		t.Fatalf("after converting the clone: %q %v", data, err)
 	}
 }

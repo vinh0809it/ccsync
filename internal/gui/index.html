@@ -1212,7 +1212,7 @@ const LOCAL_REL = {
   ahead:    ['acc',  'Ahead',          'Newer here: this machine has messages the store copy lacks — push it'],
   behind:   ['warn', 'Behind',         'Newer in the store: the store copy has messages this machine lacks — pull it'],
   diverged: ['err',  'Diverged',       'Continued both here and on another machine — pushing or pulling with overwrite keeps one side'],
-  unknown:  ['dim',  '?',              'Can’t compare: the copies have no comparable entries'],
+  unknown:  ['dim',  '?',              'Can’t compare yet: the store copy was pushed by an older ccsync or has no comparable entries — push it once to record what it holds'],
 };
 const badge = ([cls, text, tip]) =>
   `<span class="badge ${cls}" title="${esc(tip || '')}">${esc(text)}</span>`;

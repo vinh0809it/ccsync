@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +28,10 @@ type transport interface {
 	// history reports what the shared history holds; ErrNoHistory if
 	// there is none.
 	history() (History, error)
+	// parts lists the files of a session's encrypted bundle, in order.
+	parts(id string) ([]string, error)
+	// openPart opens one of them; a git store downloads it if needed.
+	openPart(id, name string) (io.ReadCloser, error)
 	// compact drops the shared history (see Store.Compact).
 	compact() (CompactResult, error)
 	// forget removes what this machine keeps of the store — never the
@@ -100,3 +105,24 @@ func (folderTransport) history() (History, error)       { return History{}, ErrN
 
 // forget leaves the folder alone: it is the shared store itself.
 func (folderTransport) forget() error { return nil }
+
+func (f folderTransport) parts(id string) ([]string, error) { return diskParts(f.s, id) }
+
+func (f folderTransport) openPart(id, name string) (io.ReadCloser, error) {
+	return os.Open(f.s.path(sessionsDir, id, name))
+}
+
+// diskParts lists the bundle parts present on disk: data.age, data.age.1, ...
+func diskParts(s *Store, id string) ([]string, error) {
+	var names []string
+	for i := 0; ; i++ {
+		_, err := os.Stat(s.path(sessionsDir, id, partName(i)))
+		if os.IsNotExist(err) {
+			return names, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		names = append(names, partName(i))
+	}
+}

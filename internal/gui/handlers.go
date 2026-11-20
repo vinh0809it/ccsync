@@ -147,9 +147,8 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, fmt.Errorf("invalid session id"))
 		return
 	}
-	const n = 6
 	if r.URL.Query().Get("from") != "local" {
-		msgs, err := s.client.Preview(id, n)
+		msgs, err := s.client.Preview(id)
 		if err != nil {
 			fail(w, http.StatusInternalServerError, err)
 			return
@@ -166,7 +165,7 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, l := range locals {
 		if l.ID == id {
-			msgs, err := session.PreviewFile(l.File, n)
+			msgs, err := session.PreviewFile(l.File, app.PreviewMessages)
 			if err != nil {
 				fail(w, http.StatusInternalServerError, err)
 				return

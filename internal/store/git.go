@@ -62,11 +62,19 @@ func (g gitTransport) open(repoURL string) error {
 		if err := os.MkdirAll(filepath.Dir(g.s.Dir), 0o700); err != nil {
 			return err
 		}
-		// A partial clone: the old versions in the history are never
-		// needed here, so their data isn't downloaded (hosts without
-		// partial-clone support send everything, as before).
-		if _, err := g.gitIn(".", "clone", "--quiet", "--filter=blob:none", "--", repoURL, g.s.Dir); err != nil {
+		// A partial clone checking out no bundle (see lazy): only the
+		// metadata is downloaded now. Hosts without partial-clone support
+		// send everything, as before.
+		if _, err := g.gitIn(".", "clone", "--quiet", "--no-checkout", "--filter=blob:none", "--", repoURL, g.s.Dir); err != nil {
 			return err
+		}
+		if err := g.lazy(); err != nil {
+			return err
+		}
+		if _, err := g.git("rev-parse", "--verify", "--quiet", "HEAD"); err == nil {
+			if _, err := g.git("reset", "--hard", "--quiet", "HEAD"); err != nil {
+				return err
+			}
 		}
 	} else {
 		// The clone must track the same remote, or every later push would
@@ -114,6 +122,9 @@ func (g gitTransport) sync() error {
 	if _, err := g.git("fetch", "--quiet", "origin"); err != nil {
 		return err
 	}
+	if err := g.lazy(); err != nil {
+		return err
+	}
 	// sync discards local changes: be sure this is a ccsync store first.
 	if !g.upstreamIsStore() {
 		return fmt.Errorf("%s does not track a ccsync store (no %s upstream) — forget it (ccsync store forget) and set it up again", g.s.Dir, markerFile)
@@ -142,10 +153,15 @@ func (g gitTransport) commit(message string) error {
 	if len(paths) == 0 {
 		return ErrNothingToCommit
 	}
-	if _, err := g.git(append([]string{"add", "-A", "--"}, paths...)...); err != nil {
+	// Bundles are staged by stageParts; they are outside the checkout.
+	exclude := ":(exclude,glob)" + sessionsDir + "/*/data.age*"
+	if _, err := g.git(append(append([]string{"add", "-A", "--"}, paths...), exclude)...); err != nil {
 		return err
 	}
-	out, err := g.git(append([]string{"status", "--porcelain", "--"}, paths...)...)
+	if err := g.stageParts(); err != nil {
+		return err
+	}
+	out, err := g.git("diff", "--cached", "--name-only")
 	if err != nil {
 		return err
 	}

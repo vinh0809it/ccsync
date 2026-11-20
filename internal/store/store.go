@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/vinh0809it/ccsync/internal/crypto"
+	"github.com/vinh0809it/ccsync/internal/session"
 )
 
 // Format is the store format this version reads and writes.
@@ -79,6 +80,9 @@ type Meta struct {
 	// bundle. Empty for copies pushed before ccsync 0.2.0.
 	Entries  string    `json:"entries,omitempty"`
 	PushedAt time.Time `json:"pushed_at"`
+	// Preview holds the session's last messages, so they show without
+	// downloading the bundle. Empty for copies pushed before it existed.
+	Preview []session.Message `json:"preview,omitempty"`
 }
 
 // Store is one store as this machine sees it.

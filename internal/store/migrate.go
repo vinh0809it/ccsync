@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/vinh0809it/ccsync/internal/crypto"
@@ -73,7 +74,7 @@ func (s *Store) migrationKey(passphrase string) (*crypto.Key, error) {
 // transcript) as a current-format bundle.
 func (s *Store) convertLegacy(key *crypto.Key, passphrase, id string) error {
 	metaBlob, err1 := os.ReadFile(s.path(sessionsDir, id, "meta.age"))
-	dataBlob, err2 := os.ReadFile(s.path(sessionsDir, id, "data.age"))
+	dataBlob, err2 := s.readPart(id, partName(0))
 	if err := errors.Join(err1, err2); err != nil {
 		return err
 	}
@@ -95,4 +96,14 @@ func (s *Store) convertLegacy(key *crypto.Key, passphrase, id string) error {
 	}
 	m.ContentHash = hash
 	return s.Put(key, m, payload)
+}
+
+// readPart reads one whole bundle file.
+func (s *Store) readPart(id, name string) ([]byte, error) {
+	f, err := s.t.openPart(id, name)
+	if err != nil {
+		return nil, err
+	}
+	data, err := io.ReadAll(f)
+	return data, errors.Join(err, f.Close())
 }

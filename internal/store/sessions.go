@@ -32,15 +32,23 @@ func (s *Store) Put(key *crypto.Key, meta Meta, payload []byte) error {
 	if err := os.MkdirAll(s.path(sessionsDir, meta.SessionID), 0o755); err != nil {
 		return err
 	}
+	if err := s.writeData(meta.SessionID, func(w io.Writer) error { return key.EncryptTo(w, payload) }); err != nil {
+		return err
+	}
+	return s.PutMeta(key, meta)
+}
+
+// PutMeta rewrites a session's metadata alone, its bundle unchanged.
+func (s *Store) PutMeta(key *crypto.Key, meta Meta) error {
+	if err := checkID(meta.SessionID); err != nil {
+		return err
+	}
 	metaJSON, err := json.Marshal(meta)
 	if err != nil {
 		return err
 	}
 	metaBlob, err := key.Encrypt(metaJSON)
 	if err != nil {
-		return err
-	}
-	if err := s.writeData(meta.SessionID, func(w io.Writer) error { return key.EncryptTo(w, payload) }); err != nil {
 		return err
 	}
 	return writeAtomic(s.path(sessionsDir, meta.SessionID, "meta.age"), metaBlob)
@@ -256,8 +264,15 @@ func (s *Store) OpenPayload(key *crypto.Key, id string) (io.ReadCloser, error) {
 	if err := checkID(id); err != nil {
 		return nil, err
 	}
+	names, err := s.t.parts(id)
+	if err != nil {
+		return nil, err
+	}
+	if len(names) == 0 {
+		return nil, fmt.Errorf("session %s: no data in the store", id)
+	}
 	var parts []io.Reader
-	var files []*os.File
+	var files []io.Closer
 	closeAll := func() error {
 		var errs []error
 		for _, f := range files {
@@ -265,11 +280,8 @@ func (s *Store) OpenPayload(key *crypto.Key, id string) (io.ReadCloser, error) {
 		}
 		return errors.Join(errs...)
 	}
-	for i := 0; ; i++ {
-		f, err := os.Open(s.path(sessionsDir, id, partName(i)))
-		if i > 0 && os.IsNotExist(err) {
-			break
-		}
+	for _, name := range names {
+		f, err := s.t.openPart(id, name)
 		if err != nil {
 			closeAll()
 			return nil, err

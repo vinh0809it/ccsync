@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -143,11 +144,31 @@ func (c *Client) stagePush(sessions []session.Session, fallbackCwd string, opts 
 	// First drop what the store already has (same entries, by the
 	// fingerprint pushes record): those need no packing or encrypting.
 	var changed []session.Session
+	// backfill completes the metadata of a store copy that is in sync but
+	// was pushed before fingerprints or previews were recorded, so status
+	// and previews never need its bundle. The bundle stays as it is.
+	backfill := func(existing store.Meta, entries string, preview []session.Message) error {
+		if existing.Entries != "" && len(existing.Preview) > 0 {
+			return nil
+		}
+		existing.Entries, existing.Preview = entries, preview
+		if err := c.store.PutMeta(c.key, existing); err != nil {
+			return err
+		}
+		pending++
+		return nil
+	}
 	for i, s := range sessions {
 		c.progress("Checking", i, len(sessions))
 		if existing, found, err := c.store.Lookup(c.key, s.ID); err == nil && found && existing.Entries != "" {
 			if transcript, err := os.ReadFile(s.File); err == nil && session.Fingerprint(transcript) == existing.Entries {
 				res.Skipped = append(res.Skipped, s.ID)
+				if len(existing.Preview) == 0 {
+					preview, _ := session.Preview(bytes.NewReader(transcript), PreviewMessages)
+					if err := backfill(existing, existing.Entries, preview); err != nil {
+						return res, 0, err
+					}
+				}
 				continue
 			}
 		}
@@ -165,6 +186,9 @@ func (c *Client) stagePush(sessions []session.Session, fallbackCwd string, opts 
 		found = found && err == nil
 		if found && existing.ContentHash == it.meta.ContentHash {
 			res.Skipped = append(res.Skipped, it.meta.SessionID)
+			if err := backfill(existing, it.meta.Entries, it.meta.Preview); err != nil {
+				return res, 0, err
+			}
 			continue
 		}
 		if found {
@@ -177,6 +201,9 @@ func (c *Client) stagePush(sessions []session.Session, fallbackCwd string, opts 
 				// The copies differ only in relocated paths or bookkeeping,
 				// e.g. a session pulled to another path and not continued.
 				res.Skipped = append(res.Skipped, it.meta.SessionID)
+				if err := backfill(existing, it.meta.Entries, it.meta.Preview); err != nil {
+					return res, 0, err
+				}
 				continue
 			case rel != session.Ahead && !opts.Overwrite:
 				res.Rejected = append(res.Rejected, Rejection{Local: it.session, Store: existing, Relation: rel})
@@ -231,6 +258,7 @@ func bundle(s session.Session, fallbackCwd, host string) (pushItem, error) {
 	if cwd == "" {
 		cwd = fallbackCwd
 	}
+	preview, _ := session.Preview(bytes.NewReader(contents.Transcript), PreviewMessages)
 	return pushItem{session: s, transcript: contents.Transcript, payload: payload, meta: store.Meta{
 		SessionID:     s.ID,
 		Title:         s.Title,
@@ -243,5 +271,6 @@ func bundle(s session.Session, fallbackCwd, host string) (pushItem, error) {
 		Size:          s.Size,
 		ContentHash:   hash,
 		Entries:       session.Fingerprint(contents.Transcript),
+		Preview:       preview,
 	}}, nil
 }

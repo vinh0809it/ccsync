@@ -276,7 +276,8 @@ func TestPushOverUnreadableStoreCopy(t *testing.T) {
 	}
 	// Corrupt the store copy's bundle (and publish the corruption).
 	os.WriteFile(filepath.Join(c.Entry.Dir, "sessions", bad.ID, "data.age"), []byte("garbage"), 0o644)
-	testutil.Git(t, c.Entry.Dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "corrupt")
+	testutil.Git(t, c.Entry.Dir, "add", "--sparse", "sessions/"+bad.ID+"/data.age") // outside the checkout
+	testutil.Git(t, c.Entry.Dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "corrupt")
 	testutil.Git(t, c.Entry.Dir, "push", "-q")
 	appendLine(t, bad.File, `{"type":"user","uuid":"u2"}`)
 
@@ -485,5 +486,63 @@ func TestStatus(t *testing.T) {
 	cancel()
 	if _, err := c.Status(ctx, []session.Session{s}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled status: err = %v", err)
+	}
+}
+
+// TestPreviewFromMetadata: a push records the last messages in the
+// metadata, and a store preview reads them from there.
+func TestPreviewFromMetadata(t *testing.T) {
+	m, c := machine(t, testutil.Remote(t))
+	s := localSession(t, m, "70707070-aaaa-bbbb-cccc-000000000001",
+		`{"type":"user","uuid":"u1","message":{"content":"how do I sync?"}}`)
+	if _, err := c.Push([]session.Session{s}, "", PushOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	meta, found, err := c.store.Lookup(c.key, s.ID)
+	if err != nil || !found || len(meta.Preview) != 1 || meta.Preview[0].Text != "how do I sync?" {
+		t.Fatalf("meta preview = %+v (%v %v)", meta.Preview, found, err)
+	}
+	// The bundle isn't needed for it.
+	os.RemoveAll(filepath.Join(c.Entry.Dir, ".git", "objects"))
+	if msgs, err := c.Preview(s.ID); err != nil || len(msgs) != 1 {
+		t.Fatalf("preview = %+v %v", msgs, err)
+	}
+}
+
+// TestPushBackfillsMetadata: an in-sync store copy pushed before
+// fingerprints and previews existed gets them, without a new bundle.
+func TestPushBackfillsMetadata(t *testing.T) {
+	m, c := machine(t, testutil.Remote(t))
+	s := localSession(t, m, "71717171-aaaa-bbbb-cccc-000000000001",
+		`{"type":"user","uuid":"u1","message":{"content":"old push"}}`)
+	if _, err := c.Push([]session.Session{s}, "", PushOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	meta, _, _ := c.store.Lookup(c.key, s.ID)
+	meta.Entries, meta.Preview = "", nil // as an older ccsync pushed it
+	if err := c.store.PutMeta(c.key, meta); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.store.Commit("old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.store.Push(); err != nil {
+		t.Fatal(err)
+	}
+	bundle := testutil.Git(t, c.Entry.Dir, "rev-parse", "HEAD:sessions/"+s.ID+"/data.age")
+
+	res, err := c.Push([]session.Session{s}, "", PushOptions{})
+	if err != nil || len(res.Pushed) != 0 || len(res.Skipped) != 1 {
+		t.Fatalf("push = %+v %v", res, err)
+	}
+	meta, _, _ = c.store.Lookup(c.key, s.ID)
+	if meta.Entries == "" || len(meta.Preview) != 1 {
+		t.Fatalf("metadata not backfilled: %+v", meta)
+	}
+	if testutil.Git(t, c.Entry.Dir, "rev-parse", "HEAD:sessions/"+s.ID+"/data.age") != bundle {
+		t.Fatal("the bundle was rewritten")
+	}
+	if remote := testutil.Git(t, c.Entry.Dir, "rev-parse", "@{u}"); remote != testutil.Git(t, c.Entry.Dir, "rev-parse", "HEAD") {
+		t.Fatal("backfill not published")
 	}
 }
