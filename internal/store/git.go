@@ -23,11 +23,40 @@ func (g gitTransport) git(args ...string) (string, error) {
 }
 
 func (g gitTransport) gitIn(dir string, args ...string) (string, error) {
-	out, err := g.command(dir, args...).CombinedOutput()
+	cmd, err := g.authed(g.command(dir, args...))
+	if err != nil {
+		return "", err
+	}
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(out)))
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// authed makes cmd authenticate as the store's GitHub account, if it has
+// one: for github.com only, git's own credential helpers are replaced by
+// one answering with that account's token, handed over in the environment
+// (never written anywhere). Other hosts never see the token.
+func (g gitTransport) authed(cmd *exec.Cmd) (*exec.Cmd, error) {
+	if g.s.account == "" {
+		return cmd, nil
+	}
+	if g.s.token == "" {
+		if TokenFor == nil {
+			return nil, fmt.Errorf("no way to get a token for the GitHub account %s", g.s.account)
+		}
+		token, err := TokenFor(g.s.account)
+		if err != nil {
+			return nil, err
+		}
+		g.s.token = token
+	}
+	helper := `!f() { test "$1" = get && echo username=x-access-token && echo "password=$CCSYNC_GIT_TOKEN"; }; f`
+	const key = "credential.https://github.com.helper"
+	cmd.Args = append(cmd.Args[:1], append([]string{"-c", key + "=", "-c", key + "=" + helper}, cmd.Args[1:]...)...)
+	cmd.Env = append(cmd.Env, "CCSYNC_GIT_TOKEN="+g.s.token)
+	return cmd, nil
 }
 
 // command prepares git to run in dir with the store's settings.
@@ -277,7 +306,10 @@ var writingObjects = regexp.MustCompile(`Writing objects:\s+\d+% \((\d+)/(\d+)\)
 // gitProgress runs git like git(), reporting its "Writing objects"
 // progress as it streams by.
 func (g gitTransport) gitProgress(progress func(done, total int), args ...string) error {
-	cmd := g.command(g.s.Dir, args...)
+	cmd, err := g.authed(g.command(g.s.Dir, args...))
+	if err != nil {
+		return err
+	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return err

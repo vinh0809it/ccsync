@@ -17,3 +17,17 @@ func TestRepo(t *testing.T) {
 		}
 	}
 }
+
+func TestParseAccounts(t *testing.T) {
+	status := `github.com
+  ✓ Logged in to github.com account alice (keyring)
+  - Active account: true
+  ✓ Logged in to github.com account bob-work (keyring)
+  - Active account: false`
+	if got := parseAccounts(status); len(got) != 2 || got[0] != "alice" || got[1] != "bob-work" {
+		t.Fatalf("accounts = %v", got)
+	}
+	if _, err := Token("bad name; rm"); err == nil {
+		t.Fatal("Token accepted an invalid account name")
+	}
+}

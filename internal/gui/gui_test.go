@@ -412,3 +412,21 @@ func TestProgressAnswersDuringAnOperation(t *testing.T) {
 	e.token = "wrong"
 	e.call(t, "GET", "/api/progress", nil, false)
 }
+
+// TestUnlockSetsAccount: the account picked at unlock is kept for the
+// store (and, the repo not being on GitHub, git runs as before).
+func TestUnlockSetsAccount(t *testing.T) {
+	e := setup(t)
+	e.start(t)
+	e.call(t, "POST", "/api/setup", map[string]string{"name": "test", "location": e.remote, "passphrase": pass}, true)
+	e.start(t)
+	e.call(t, "POST", "/api/unlock", map[string]any{"passphrase": pass, "account": "alice"}, true)
+	var st struct {
+		Stores []struct{ Account string } `json:"stores"`
+	}
+	json.Unmarshal(e.call(t, "GET", "/api/state", nil, true), &st)
+	if len(st.Stores) != 1 || st.Stores[0].Account != "alice" {
+		t.Fatalf("stores = %+v", st.Stores)
+	}
+	e.call(t, "GET", "/api/store", nil, true)
+}

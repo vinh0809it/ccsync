@@ -279,10 +279,26 @@ try { const t = localStorage.getItem('ccsync-theme'); if (t) document.documentEl
   .filterchip:hover { color: var(--accent); border-color: var(--accent); }
   .filterchip.on { color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent); }
   .badge.warn { background: var(--warn-soft); color: var(--warn); }
-  .mapbox { padding: 12px 14px; border-radius: 12px; background: var(--card2); border: 1px solid var(--line2); margin-top: 6px; }
-  .maphead { display: flex; align-items: flex-start; gap: 12px; justify-content: space-between; margin-bottom: 8px; }
-  .maphead b { display: block; font-size: 13.5px; }
-  .maphead .btn { flex: none; }
+  .pmsum { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; }
+  .pmsum .badge { text-transform: none; letter-spacing: 0; font-size: 12px; padding: 3px 10px; }
+  .pmcount { font-size: 12px; color: var(--faint); margin-left: 2px; }
+  .maprow { display: flex; align-items: center; gap: 12px; justify-content: space-between; padding: 10px 12px;
+    border-radius: 12px; border: 1px dashed var(--line); margin: 6px 0 8px; }
+  .maptxt { min-width: 0; display: flex; flex-direction: column; }
+  .maptxt b { font-size: 13px; }
+  .maprow .btn { flex: none; }
+  .plan { display: flex; flex-direction: column; gap: 8px; }
+  .pgroup { border: 1px solid var(--line2); border-radius: 12px; overflow: hidden; background: var(--card2); }
+  .phead { display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 12.5px; color: var(--muted);
+    border-bottom: 1px solid var(--line2); min-width: 0; }
+  .phead svg { flex: none; color: var(--accent); }
+  .phead .mono { flex: 1; min-width: 0; color: var(--ink); }
+  .phead .pn { flex: none; margin-left: auto; font-weight: 700; font-size: 11.5px; color: var(--faint); }
+  .pitem { display: flex; align-items: center; gap: 10px; padding: 6px 12px 6px 34px; font-size: 13px; background: var(--card); }
+  .pitem + .pitem { border-top: 1px solid var(--line2); }
+  .pitem .ell { flex: 1; min-width: 0; }
+  .pstate { flex: none; font-size: 11px; font-weight: 700; color: var(--faint); }
+  .pstate.new { color: var(--accent); }
   .rule { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
   .rule input { flex: 1; min-width: 0; }
   .rule .arrow { color: var(--faint); }
@@ -560,6 +576,10 @@ try { const t = localStorage.getItem('ccsync-theme'); if (t) document.documentEl
         <span class="kicon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
         <span><b>Add a store</b><small>Another repo or synced folder, or one another machine made</small></span>
       </button>
+      <div id="unlockAcctRow" class="hidden">
+        <label for="unlockAccount">GitHub account</label>
+        <select id="unlockAccount"></select>
+      </div>
       <label for="unlockPass">Passphrase</label>
       <div class="pw">
         <input id="unlockPass" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doUnlock()">
@@ -594,12 +614,12 @@ try { const t = localStorage.getItem('ccsync-theme'); if (t) document.documentEl
         <label for="ghName">Repository name</label>
         <input id="ghName" type="text" placeholder="claude-sessions" autocomplete="off"
           oninput="if(!nameEdited) storeName.value = nameFromUrl(this.value)">
-        <p class="note">Created as a <b>private</b> repo under the account <span class="mono">gh</span> is logged in to.</p>
+        <p class="note">Created as a <b>private</b> repo under the GitHub account picked below.</p>
       </div>
       <div id="kindGit" class="kindbox">
         <label for="repoUrl">Repository URL</label>
         <input id="repoUrl" type="text" class="mono" placeholder="https://github.com/you/claude-sessions.git" autocomplete="off"
-          oninput="if(!nameEdited) storeName.value = nameFromUrl(this.value)">
+          oninput="if(!nameEdited) storeName.value = nameFromUrl(this.value); setupAccountRow()">
         <p class="note">An empty repo (or one with just a README), ideally <b>private</b>. Your existing git login
           is used — ccsync never stores credentials.</p>
       </div>
@@ -609,6 +629,11 @@ try { const t = localStorage.getItem('ccsync-theme'); if (t) document.documentEl
           oninput="if(!nameEdited) storeName.value = nameFromUrl(this.value)">
         <p class="note">An empty folder your sync service shares between machines — or the store folder another
           machine already made.</p>
+      </div>
+      <div id="setupAcctRow" class="hidden">
+        <label for="setupAccount">GitHub account</label>
+        <select id="setupAccount"></select>
+        <p class="note" style="margin-top:6px">git signs in to GitHub as this account for this store only.</p>
       </div>
       <label for="storeName">Name on this machine <span class="muted">(e.g. work, personal)</span></label>
       <input id="storeName" type="text" placeholder="default" autocomplete="off" oninput="nameEdited = true">
@@ -783,18 +808,18 @@ try { const t = localStorage.getItem('ccsync-theme'); if (t) document.documentEl
 </dialog>
 
 <!-- ===== Pull several sessions ===== -->
-<dialog id="pullManyDlg">
+<dialog id="pullManyDlg" class="wide">
   <div class="dlg-head"><h2 id="pmTitle">Pull sessions</h2>
-    <p class="note" style="margin-top:6px">Check where each session goes, then pull. Nothing is pulled before you press Pull.</p></div>
+    <div class="pmsum" id="pmSummary"></div></div>
   <div class="dlg-body">
-    <div class="mapbox">
-      <div class="maphead"><div><b>Folder mappings</b>
-        <span class="note">For projects kept in a different folder here, e.g. <span class="mono">~/dev</span> → <span class="mono">~/code</span>.</span></div>
-        <button class="btn ghost sm" onclick="addRule()">+ Map a folder</button></div>
-      <div id="pmRules"></div>
+    <div class="maprow">
+      <div class="maptxt"><b>Folder mappings</b>
+        <span class="note" id="pmMapNote">Sessions go to the path they had on the other machine.</span></div>
+      <button class="btn ghost sm" onclick="addRule()">+ Map a folder</button>
     </div>
-    <label>Where each session goes</label>
-    <ul id="pmPlan" class="pushlist"></ul>
+    <div id="pmRules"></div>
+    <div class="sect">Destinations</div>
+    <div id="pmPlan" class="plan"></div>
     <label class="selall" style="margin-top:12px">
       <input type="checkbox" id="pmForce"> replace local copies that are newer or were continued here (kept as .bak files)</label>
   </div>
@@ -1004,14 +1029,37 @@ function showUnlock() {
       <span class="tick" aria-hidden="true"></span>
     </label>`).join('');
   box.querySelectorAll('input').forEach(r => r.addEventListener('change', () => {
+    showUnlockAccount();
     lockError('unlockErr', '');
     document.getElementById('unlockPass').focus();
   }));
   document.getElementById('unlockPass').value = '';
+  showUnlockAccount();
   lockError('unlockErr', '');
   document.getElementById('lock').classList.remove('hidden');
   document.getElementById('unlockBox').classList.remove('hidden');
   document.getElementById('unlockPass').focus();
+}
+
+// isGitHub: an account only applies to a repo on github.com over https.
+const isGitHub = url => /^https:\/\/github\.com\//i.test((url || '').trim());
+
+// accountOptions fills a GitHub account picker: gh's logged-in accounts,
+// then git's own login.
+function accountOptions(sel, chosen) {
+  const names = state.accounts || [];
+  sel.innerHTML = names.map(a => `<option value="${esc(a)}">${esc(a)}</option>`).join('') +
+    '<option value="">Git’s own login</option>';
+  sel.value = names.includes(chosen) || chosen === '' ? chosen : (names[0] || '');
+}
+
+// showUnlockAccount offers the picked store's GitHub account, for a git
+// store when gh knows any account.
+function showUnlockAccount() {
+  const st = state.stores.find(x => x.name === pickedStore());
+  const show = !!st && isGitHub(st.location) && (state.accounts || []).length > 0;
+  document.getElementById('unlockAcctRow').classList.toggle('hidden', !show);
+  if (show) accountOptions(document.getElementById('unlockAccount'), st.account || '');
 }
 
 function pickedStore() {
@@ -1019,8 +1067,19 @@ function pickedStore() {
   return r ? r.value : '';
 }
 
+// setupAccountRow offers a GitHub account when the store will be on GitHub.
+function setupAccountRow() {
+  const kind = document.querySelector('input[name=kind]:checked').value;
+  const show = (state.accounts || []).length > 0 &&
+    (kind === 'github' || (kind === 'git' && isGitHub(document.getElementById('repoUrl').value)));
+  document.getElementById('setupAcctRow').classList.toggle('hidden', !show);
+}
+
 function setupKind() {
   const kind = document.querySelector('input[name=kind]:checked').value;
+  const accounts = state.accounts || [];
+  setupAccountRow();
+  accountOptions(document.getElementById('setupAccount'), accounts[0] || '');
   for (const [k, id] of [['github', 'kindGithub'], ['git', 'kindGit'], ['folder', 'kindFolder']])
     document.getElementById(id).classList.toggle('hidden', k !== kind);
   lockError('setupErr', '');
@@ -1039,6 +1098,8 @@ async function doSetup() {
   if (p1 !== p2) return lockError('setupErr', 'The passphrases don’t match.');
   lockError('setupErr', '');
   const req = { name, passphrase: p1, kind: kind === 'folder' ? 'folder' : 'git' };
+  if (!document.getElementById('setupAcctRow').classList.contains('hidden'))
+    req.account = document.getElementById('setupAccount').value;
   if (kind === 'github') req.createGitHub = where; else req.location = where;
   busy('setupGo', 'setupSpin', true, 'setupLbl', kind === 'folder' ? 'Setting up…' : 'Setting up — this can take a moment…', 'Set up store');
   try {
@@ -1053,10 +1114,10 @@ async function doUnlock() {
   lockError('unlockErr', '');
   busy('unlockGo', 'unlockSpin', true, 'unlockLbl', 'Unlocking…', 'Unlock');
   try {
-    await api('/api/unlock', {
-      store: pickedStore(),
-      passphrase: document.getElementById('unlockPass').value,
-    });
+    const req = { store: pickedStore(), passphrase: document.getElementById('unlockPass').value };
+    if (!document.getElementById('unlockAcctRow').classList.contains('hidden'))
+      req.account = document.getElementById('unlockAccount').value;
+    await api('/api/unlock', req);
     await boot();
   } catch (e) {
     lockError('unlockErr', e.message);
@@ -1511,7 +1572,7 @@ function renderStore() {
 // ----- Pull several sessions -----
 
 const storeSelected = new Set(); // store sessions ticked for pull
-let pmIds = [], pmRules = [], pmTimer = null;
+let pmIds = [], pmRules = [], pmTimer = null, pmHome = '';
 
 function syncStoreSel() {
   const ids = new Set(storeMetas.map(m => m.session_id));
@@ -1554,6 +1615,7 @@ async function openPullMany() {
   btn.innerHTML = '<span class="spin"></span> Preparing…';
   try {
     let r = await api('/api/pull-plan', { ids: pmIds, map: pmRules || [] });
+    pmHome = r.home || '';
     if (pmRules === null) { // first time for this store: start from the suggestion
       pmRules = r.suggest;
       if (pmRules.length) r = await api('/api/pull-plan', { ids: pmIds, map: cleanRules() });
@@ -1574,7 +1636,10 @@ function renderRules() {
       <span class="arrow" aria-hidden="true">→</span>
       <input type="text" class="mono" data-i="${i}" data-k="to" value="${esc(r.to)}" placeholder="/Users/alice/code" aria-label="Folder on this machine">
       <button class="linkbtn" data-i="${i}" aria-label="Remove this mapping">Remove</button>
-    </div>`).join('') : '<p class="note">None — every session goes to the path it had on the other machine.</p>';
+    </div>`).join('') : '';
+  document.getElementById('pmMapNote').textContent = pmRules.length
+    ? 'Each session under the left folder goes under the right one here.'
+    : 'Sessions go to the path they had on the other machine.';
   box.querySelectorAll('input').forEach(inp => inp.addEventListener('input', () => {
     pmRules[+inp.dataset.i][inp.dataset.k] = inp.value;
     replan();
@@ -1600,14 +1665,39 @@ function replan() {
   }, 300);
 }
 
+// renderPlan shows where a pull puts each session, grouped by project
+// folder, with a count of what's new, what's already here and what can't
+// go anywhere yet.
 function renderPlan(plan) {
-  document.getElementById('pmPlan').innerHTML = plan.map(p => {
-    const notes = [];
-    if (!p.dest) notes.push('<span class="badge warn">no project path — pull it on its own</span>');
-    else if (!p.destExists) notes.push('<span class="badge warn">folder not on this machine</span>');
-    if (p.localExists) notes.push('<span class="badge">already here — will be compared</span>');
-    return `<li><div class="ttl">${esc(p.title) || '<span class="muted">(untitled)</span>'} ${notes.join(' ')}</div>
-      <div class="mono">${esc(p.dest || p.from || '')}</div></li>`;
+  const tilde = p => pmHome && (p === pmHome || p.startsWith(pmHome + '/')) ? '~' + p.slice(pmHome.length) : p;
+  const groups = new Map();
+  for (const p of plan) {
+    const key = p.dest || '';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(p);
+  }
+  const fresh = plan.filter(p => p.dest && !p.localExists).length;
+  const here = plan.filter(p => p.localExists).length;
+  const missing = plan.filter(p => p.dest && !p.destExists).length;
+  const nowhere = plan.filter(p => !p.dest).length;
+  document.getElementById('pmSummary').innerHTML = [
+    fresh && `<span class="badge acc">${fresh} new</span>`,
+    here && `<span class="badge" title="Already on this machine: only a newer store copy replaces it">${here} already here</span>`,
+    missing && `<span class="badge warn" title="The folder will be created">${missing} in a folder not here yet</span>`,
+    nowhere && `<span class="badge err" title="No project path was recorded: pull it on its own">${nowhere} without a path</span>`,
+    `<span class="pmcount">${groups.size} folder(s)</span>`,
+  ].filter(Boolean).join('');
+  const keys = [...groups.keys()].sort((a, b) => (a === '') - (b === '') || a.localeCompare(b));
+  document.getElementById('pmPlan').innerHTML = keys.map(dest => {
+    const items = groups.get(dest), first = items[0];
+    const head = dest
+      ? `<span class="mono ell" title="${esc(dest)}">${esc(tilde(dest))}</span>` +
+        (first.destExists ? '' : '<span class="badge warn">new folder</span>')
+      : '<span class="muted">No project path recorded — pull these on their own</span>';
+    return `<div class="pgroup"><div class="phead"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>${head}<span class="pn">${items.length}</span></div>` +
+      items.map(p => `<div class="pitem"><span class="ell" title="${esc(p.title)}">${esc(p.title) || '<span class="muted">(untitled)</span>'}</span>` +
+        `<span class="pstate ${p.localExists ? '' : 'new'}" title="${p.localExists ? 'Already on this machine: only a newer store copy replaces it' : 'Not on this machine yet'}">${p.localExists ? 'here' : 'new'}</span></div>`).join('') +
+      '</div>';
   }).join('');
 }
 

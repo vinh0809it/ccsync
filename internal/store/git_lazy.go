@@ -129,7 +129,10 @@ func (g gitTransport) openPart(id, name string) (io.ReadCloser, error) {
 	if f, err := os.Open(g.s.path(sessionsDir, id, name)); err == nil || !os.IsNotExist(err) {
 		return f, err
 	}
-	cmd := g.command(g.s.Dir, "cat-file", "blob", ":"+sessionsDir+"/"+id+"/"+name)
+	cmd, err := g.authed(g.command(g.s.Dir, "cat-file", "blob", ":"+sessionsDir+"/"+id+"/"+name))
+	if err != nil {
+		return nil, err
+	}
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.StdoutPipe()

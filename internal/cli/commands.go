@@ -20,10 +20,11 @@ func (c *cli) init(args []string) error {
 	ghRepo := fs.String("github", "", "create this private GitHub repo (`name` or owner/name) through the GitHub CLI")
 	folder := fs.String("folder", "", "keep the store in this synced folder (Dropbox, iCloud Drive, ...) instead of git")
 	allowPublic := fs.Bool("allow-public", false, "accept a public GitHub repo")
-	if err := c.parseFlags(fs, args, "name", "github", "folder"); err != nil {
+	account := fs.String("account", "", "GitHub `account` (one gh is logged in to) git uses for this store")
+	if err := c.parseFlags(fs, args, "name", "github", "folder", "account"); err != nil {
 		return err
 	}
-	spec := app.NewStore{Name: *name, AllowPublic: *allowPublic}
+	spec := app.NewStore{Name: *name, AllowPublic: *allowPublic, Account: *account}
 	switch {
 	case *folder != "" && *ghRepo == "" && fs.NArg() == 0:
 		spec.Kind, spec.Location = store.KindFolder, *folder

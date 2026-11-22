@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/vinh0809it/ccsync/internal/crypto"
@@ -104,11 +105,21 @@ type Store struct {
 
 	lockFile string // serializes ccsync processes using this store
 	t        transport
+
+	account string // Entry.Account
+	token   string // its token, once fetched
 }
+
+// TokenFor returns a GitHub account's token (for Entry.Account); set by
+// the app, so this package needs no GitHub CLI.
+var TokenFor func(account string) (string, error)
 
 // Open returns the store described by e.
 func Open(e Entry) *Store {
 	s := &Store{Dir: e.Dir, Interactive: true}
+	if strings.HasPrefix(e.RepoURL, "https://github.com/") {
+		s.account = e.Account // a GitHub login means nothing to another host
+	}
 	if e.Name != "" {
 		s.lockFile, _ = lockPath(e.Name)
 	}

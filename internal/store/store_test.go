@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -744,5 +745,37 @@ func TestCompactFromLazyClone(t *testing.T) {
 	keyC := open(t, c, remote)
 	if data, err := payload(t, c, keyC, id); err != nil || string(data) != "v2" {
 		t.Fatalf("fresh clone after compact: %q %v", data, err)
+	}
+}
+
+// TestAccountAuth: a store with a GitHub account runs git with a helper
+// answering that account's token — from the environment, never on disk —
+// and replaces git's own helpers.
+func TestAccountAuth(t *testing.T) {
+	old := TokenFor
+	t.Cleanup(func() { TokenFor = old })
+	asked := 0
+	TokenFor = func(account string) (string, error) { asked++; return "tok-" + account, nil }
+	st := Open(Entry{Name: "x", Dir: t.TempDir(), RepoURL: "https://github.com/alice/s.git", Account: "alice"})
+	g := gitTransport{st}
+	for i := 0; i < 2; i++ {
+		cmd, err := g.authed(g.command(st.Dir, "fetch"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		args := strings.Join(cmd.Args, " ")
+		if !strings.Contains(args, "-c credential.https://github.com.helper= -c credential.https://github.com.helper=!f()") || strings.Contains(args, "tok-alice") {
+			t.Fatalf("args = %s", args)
+		}
+		if !slices.Contains(cmd.Env, "CCSYNC_GIT_TOKEN=tok-alice") {
+			t.Fatal("token not in the environment")
+		}
+	}
+	if asked != 1 {
+		t.Fatalf("token fetched %d times", asked)
+	}
+	plain := Open(Entry{Name: "y", Dir: t.TempDir(), RepoURL: "https://gitlab.com/alice/s.git", Account: "alice"}) // not GitHub
+	if cmd, _ := (gitTransport{plain}).authed(gitTransport{plain}.command(plain.Dir, "fetch")); strings.Contains(strings.Join(cmd.Args, " "), "credential.helper") {
+		t.Fatal("a store without an account changed git's credentials")
 	}
 }

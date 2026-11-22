@@ -4,9 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/vinh0809it/ccsync/internal/app"
 	"github.com/vinh0809it/ccsync/internal/crypto"
+	"github.com/vinh0809it/ccsync/internal/github"
 	"github.com/vinh0809it/ccsync/internal/session"
 	"github.com/vinh0809it/ccsync/internal/store"
 )
@@ -22,13 +24,14 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		Kind     string `json:"kind"`
 		Location string `json:"location"` // repo URL or folder
 		Link     string `json:"link"`     // web page or folder to open, if any
+		Account  string `json:"account"`  // GitHub account git uses; empty: git's own login
 	}
 	info := func(e store.Entry) storeInfo {
 		kind := string(e.Kind)
 		if kind == "" {
 			kind = string(store.KindGit)
 		}
-		return storeInfo{e.Name, kind, e.Location(), storeLink(e)}
+		return storeInfo{e.Name, kind, e.Location(), storeLink(e), e.Account}
 	}
 	stores := make([]storeInfo, 0, len(reg.Stores))
 	for _, e := range reg.Stores {
@@ -40,6 +43,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		"current":    reg.Current,
 		"unlocked":   s.client != nil,
 		"github":     s.github, // gh is logged in: offer to create a private repo
+		"accounts":   github.Accounts(),
 	}
 	if s.client != nil {
 		state["store"] = info(s.client.Entry)
@@ -54,6 +58,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		Location     string `json:"location"`     // repo URL or folder path
 		CreateGitHub string `json:"createGitHub"` // create this private GitHub repo instead
 		AllowPublic  bool   `json:"allowPublic"`
+		Account      string `json:"account"` // GitHub account for git; empty: git's own login
 		Passphrase   string `json:"passphrase"`
 	}
 	if err := decode(r, &req); err != nil || req.Name == "" || req.Passphrase == "" ||
@@ -63,7 +68,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	client, err := s.stores.Add(app.NewStore{
 		Name: req.Name, Kind: store.Kind(req.Kind), Location: req.Location,
-		CreateGitHubRepo: req.CreateGitHub, AllowPublic: req.AllowPublic,
+		CreateGitHubRepo: req.CreateGitHub, AllowPublic: req.AllowPublic, Account: req.Account,
 	}, req.Passphrase)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err)
@@ -75,12 +80,28 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Store      string `json:"store"` // empty: the current one
-		Passphrase string `json:"passphrase"`
+		Store      string  `json:"store"` // empty: the current one
+		Passphrase string  `json:"passphrase"`
+		Account    *string `json:"account"` // set: the GitHub account to use from now on
 	}
 	if err := decode(r, &req); err != nil || req.Passphrase == "" {
 		fail(w, http.StatusBadRequest, fmt.Errorf("passphrase is required"))
 		return
+	}
+	if req.Account != nil {
+		name := req.Store
+		if name == "" {
+			reg, err := s.stores.List()
+			if err != nil {
+				fail(w, http.StatusInternalServerError, err)
+				return
+			}
+			name = reg.Current
+		}
+		if err := s.stores.SetAccount(name, *req.Account); err != nil {
+			fail(w, http.StatusBadRequest, err)
+			return
+		}
 	}
 	// A format-1 store is not migrated here: migration locks out machines
 	// still on ccsync 0.1.x, so it is an explicit `ccsync migrate`.
@@ -446,7 +467,8 @@ func (s *Server) handlePullPlan(w http.ResponseWriter, r *http.Request) {
 	if suggest == nil {
 		suggest = app.PathMap{}
 	}
-	ok(w, map[string]any{"plan": rows, "suggest": suggest})
+	home, _ := os.UserHomeDir() // the page shows paths under it as ~/...
+	ok(w, map[string]any{"plan": rows, "suggest": suggest, "home": home})
 }
 
 func (s *Server) handlePullMany(w http.ResponseWriter, r *http.Request) {
