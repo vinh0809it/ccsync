@@ -103,7 +103,18 @@ try { const t = localStorage.getItem('ccsync-theme'); if (t) document.documentEl
   .wordmark { font-size: 21px; font-weight: 800; letter-spacing: -.035em; line-height: 1; }
   .tagline { font-size: 12.5px; color: var(--muted); padding-left: 12px; border-left: 1px solid var(--line);
     line-height: 1.25; }
-  .spacer { flex: 1; }
+  .spacer { flex: 1; min-width: 0; display: flex; justify-content: center; }
+  /* What the app is doing now; other actions wait meanwhile */
+  .activity { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%;
+    padding: 6px 14px; border-radius: 999px; font-size: 12.5px; color: var(--accent);
+    background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
+  .activity .act-label { font-weight: 700; white-space: nowrap; }
+  .activity .act-step { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .activity .act-step:not(:empty)::before { content: "· "; }
+  body.working :is(.acts .iconbtn, #pushBtn, #pullManyBtn, #removeManyBtn, #refreshBtn, #localRefreshBtn, #compactBtn) {
+    pointer-events: none; opacity: .45; }
+  .row.removing { opacity: .45; pointer-events: none; }
+  .row.removing .name { text-decoration: line-through; }
   @media (max-width: 760px) { .tagline { display: none; } }
 
   /* The current store, and the way back to the store list */
@@ -673,7 +684,8 @@ try { const t = localStorage.getItem('ccsync-theme'); if (t) document.documentEl
       <span class="wordmark">ccsync</span>
       <span class="tagline">Claude Code sessions,<br>synced &amp; encrypted</span>
     </div>
-    <div class="spacer"></div>
+    <div class="spacer"><div id="activity" class="activity hidden" role="status" aria-live="polite">
+      <span class="spin"></span><span class="act-label" id="actLabel"></span><span class="act-step" id="actStep"></span></div></div>
     <button class="storebtn" id="switchBtn" onclick="switchStore()" title="Switch to another store">
       <span class="kicon" id="storeKind" aria-hidden="true"></span>
       <span class="txt"><small>Store</small><b class="ell" id="storeName2"></b></span>
@@ -940,6 +952,35 @@ function trackProgress(id, dlgId, closeId) {
   };
 }
 
+// runAction runs fn with the app bar showing label and the server's
+// current step, and the other actions held off until it ends.
+let working = 0, actTimer = null;
+async function runAction(label, fn) {
+  const bar = document.getElementById('activity'), step = document.getElementById('actStep');
+  working++;
+  document.body.classList.add('working');
+  document.getElementById('actLabel').textContent = label;
+  step.textContent = '';
+  bar.classList.remove('hidden');
+  clearTimeout(actTimer);
+  const poll = async () => {
+    try {
+      const p = await api('/api/progress');
+      step.textContent = p.step ? p.step + (p.total ? ` ${Math.min(p.done + 1, p.total)}/${p.total}` : '') : '';
+    } catch {}
+    if (working) actTimer = setTimeout(poll, 400);
+  };
+  actTimer = setTimeout(poll, 200);
+  try { return await fn(); }
+  finally {
+    if (--working === 0) {
+      clearTimeout(actTimer);
+      bar.classList.add('hidden');
+      document.body.classList.remove('working');
+    }
+  }
+}
+
 function loadingHTML(text) {
   return `<div class="loading"><span class="spin"></span>${esc(text)}</div>`;
 }
@@ -1192,11 +1233,13 @@ async function compactStore() {
   const idle = icon.innerHTML;
   btn.disabled = true;
   icon.innerHTML = '<span class="spin"></span>';
-  try {
-    const r = await api('/api/compact', {});
-    toast(r.commits <= 1 ? 'The history is already a single commit'
-      : `Compacted ${r.commits} commits into 1` + (r.before >= 0 ? ` — this machine’s copy went from ${size(r.before)} to ${size(r.after)}` : ''));
-  } catch (e) { toast(e.message, true); }
+  await runAction('Compacting the history', async () => {
+    try {
+      const r = await api('/api/compact', {});
+      toast(r.commits <= 1 ? 'The history is already a single commit'
+        : `Compacted ${r.commits} commits into 1` + (r.before >= 0 ? ` — this machine’s copy went from ${size(r.before)} to ${size(r.after)}` : ''));
+    } catch (e) { toast(e.message, true); }
+  });
   btn.disabled = false;
   icon.innerHTML = idle;
 }
@@ -1231,8 +1274,7 @@ function openMain() {
 // them with the store again.
 async function refreshLocal() {
   busy('localRefreshBtn', 'localRefreshSpin', true, 'localRefreshLbl', 'Refreshing…', 'Refresh');
-  await loadProjects();
-  await loadLocal();
+  await runAction('Reading this machine’s sessions', async () => { await loadProjects(); await loadLocal(); });
   if (storeLoaded) loadStatus();
   busy('localRefreshBtn', 'localRefreshSpin', false, 'localRefreshLbl', 'Refreshing…', 'Refresh');
 }
@@ -1493,7 +1535,7 @@ async function confirmPush(overwrite = false, ids = null) {
 async function loadStore() {
   busy('refreshBtn', 'refreshSpin', true, 'refreshLbl', 'Refreshing…', 'Refresh');
   try {
-    storeMetas = (await api('/api/store'))
+    storeMetas = (await runAction('Syncing with the store', () => api('/api/store')))
       .sort((a, b) => new Date(b.session_mtime) - new Date(a.session_mtime));
     storeIds = new Set(storeMetas.map(m => m.session_id));
     storeLoaded = true;
@@ -1540,7 +1582,7 @@ function renderStore() {
     return syncStoreSel();
   }
   list.innerHTML = metas.map(m => `
-    <div class="row store pickrow${storeSelected.has(m.session_id) ? ' on' : ''}" data-id="${esc(m.session_id)}">
+    <div class="row store pickrow${storeSelected.has(m.session_id) ? ' on' : ''}${removing.has(m.session_id) ? ' removing' : ''}" data-id="${esc(m.session_id)}">
       <div class="box"></div>
       <div class="main">
         <div class="ttl"><span class="name" title="${esc(m.title)}">${esc(m.title) || '<span class="muted">(untitled)</span>'}</span>${
@@ -1741,14 +1783,19 @@ async function removeFromStore(metas) {
       : '<li>In a synced folder it is gone for good (your sync service’s trash may keep a copy).</li>') +
     '</ul>', 'Delete', true);
   if (!yes) return;
-  toast('Deleting…');
-  try {
-    const r = await api('/api/remove', { ids: metas.map(m => m.session_id) });
-    metas.forEach(m => storeSelected.delete(m.session_id));
-    toast(`Deleted ${r.removed} session(s) from the store`);
-    loadStore();
-  } catch (e) { toast(e.message, true); }
+  metas.forEach(m => removing.add(m.session_id));
+  renderStore();
+  await runAction(metas.length === 1 ? 'Deleting 1 session' : `Deleting ${metas.length} sessions`, async () => {
+    try {
+      const r = await api('/api/remove', { ids: metas.map(m => m.session_id) });
+      metas.forEach(m => storeSelected.delete(m.session_id));
+      toast(`Deleted ${r.removed} session(s) from the store`);
+    } catch (e) { toast(e.message, true); }
+    metas.forEach(m => removing.delete(m.session_id));
+    await loadStore();
+  });
 }
+const removing = new Set(); // store sessions being deleted
 
 // openInfo shows a session's details and its last messages, from this
 // machine's copy or the store's.
