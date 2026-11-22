@@ -12,6 +12,8 @@ import (
 )
 
 // Stores manages the stores this machine is set up for.
+func init() { store.TokenFor = github.Token }
+
 type Stores struct {
 	// Interactive lets git ask for credentials on the terminal; a GUI
 	// turns it off.
@@ -38,6 +40,9 @@ type NewStore struct {
 	// CreateGitHubRepo, for a git store without a Location, creates this
 	// private GitHub repo ("name" or "owner/name") through gh first.
 	CreateGitHubRepo string
+	// Account is the GitHub account git (and gh, to create the repo) uses
+	// for this store; empty: git's own credentials and the active gh login.
+	Account string
 	// AllowPublic accepts a public GitHub repo. Sessions are encrypted
 	// either way, but a public repo still shows when and how much you sync.
 	AllowPublic bool
@@ -96,7 +101,7 @@ func (m Stores) Add(spec NewStore, passphrase string) (*Client, error) {
 // entry resolves a NewStore into a registry entry, creating the GitHub
 // repo if asked and refusing public GitHub repos.
 func (m Stores) entry(spec NewStore) (store.Entry, error) {
-	e := store.Entry{Name: spec.Name, Kind: spec.Kind}
+	e := store.Entry{Name: spec.Name, Kind: spec.Kind, Account: spec.Account}
 	switch spec.Kind {
 	case store.KindFolder:
 		if spec.Location == "" {
@@ -119,7 +124,7 @@ func (m Stores) entry(spec NewStore) (store.Entry, error) {
 		if spec.Location != "" {
 			return e, fmt.Errorf("give either a repo URL or a GitHub repo to create, not both")
 		}
-		url, err := github.CreatePrivate(spec.CreateGitHubRepo)
+		url, err := github.CreatePrivate(spec.CreateGitHubRepo, spec.Account)
 		if err != nil {
 			return e, err
 		}
@@ -131,7 +136,7 @@ func (m Stores) entry(spec NewStore) (store.Entry, error) {
 	if github.Repo(e.RepoURL) != "" && !spec.AllowPublic {
 		// Only a confirmed public repo is refused: without gh the
 		// visibility can't be checked, and that must not block setup.
-		if public, err := github.IsPublic(e.RepoURL); err == nil && public {
+		if public, err := github.IsPublic(e.RepoURL, spec.Account); err == nil && public {
 			return e, ErrPublicRepo
 		}
 	}
@@ -141,6 +146,28 @@ func (m Stores) entry(spec NewStore) (store.Entry, error) {
 	}
 	e.Dir = dir
 	return e, nil
+}
+
+// SetAccount sets the GitHub account a store's git uses ("" for git's own
+// credentials).
+func (m Stores) SetAccount(name, account string) error {
+	reg, err := store.LoadRegistry()
+	if err != nil {
+		return err
+	}
+	e, err := reg.Get(name)
+	if err != nil {
+		return err
+	}
+	if e.Kind == store.KindFolder && account != "" {
+		return fmt.Errorf("%s is a synced folder: it uses no GitHub account", name)
+	}
+	if e.Account == account {
+		return nil
+	}
+	e.Account = account
+	reg.Put(e)
+	return reg.Save()
 }
 
 // Unlock opens a store (the current one when name is empty) and makes it

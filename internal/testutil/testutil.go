@@ -14,19 +14,46 @@ import (
 	"github.com/vinh0809it/ccsync/internal/crypto"
 )
 
-// Remote creates an empty bare git repo and returns its path, usable as a
-// store repo URL.
+// Remote creates an empty bare git repo and returns its file:// URL, served
+// the way a git host serves it: honoring partial-clone filters, so a
+// store's clone really lacks the blobs it hasn't asked for. The helpers
+// here accept the URL where they need the repo's path.
 func Remote(t *testing.T) string {
 	t.Helper()
-	remote := filepath.Join(t.TempDir(), "remote.git")
-	Git(t, "", "init", "--quiet", "--bare", remote)
-	return remote
+	dir := filepath.Join(t.TempDir(), "remote.git")
+	Git(t, "", "init", "--quiet", "--bare", dir)
+	Git(t, dir, "config", "uploadpack.allowFilter", "true")
+	Git(t, dir, "config", "uploadpack.allowAnySHA1InWant", "true")
+	slash := filepath.ToSlash(dir)
+	if !strings.HasPrefix(slash, "/") {
+		slash = "/" + slash // C:/... on Windows
+	}
+	return "file://" + slash
+}
+
+// RemoteDir is the path of the repo a Remote URL names.
+func RemoteDir(remote string) string {
+	p, ok := strings.CutPrefix(remote, "file://")
+	if !ok {
+		return remote
+	}
+	if len(p) > 2 && p[0] == '/' && p[2] == ':' {
+		p = p[1:] // /C:/... on Windows
+	}
+	return filepath.FromSlash(p)
+}
+
+// MissingObjects counts the objects a partial clone at dir doesn't have.
+func MissingObjects(t *testing.T, dir string) int {
+	t.Helper()
+	return strings.Count(Git(t, dir, "rev-list", "--objects", "--missing=print", "HEAD"), "?")
 }
 
 // RejectFirstPush makes the remote refuse the next push only, as a
 // transient failure (network, auth) would.
 func RejectFirstPush(t *testing.T, remote string) {
 	t.Helper()
+	remote = RemoteDir(remote)
 	marker := filepath.ToSlash(filepath.Join(remote, "rejected-once"))
 	hook := "#!/bin/sh\n[ -e '" + marker + "' ] && exit 0\ntouch '" + marker + "'\nexit 1\n"
 	if err := os.WriteFile(filepath.Join(remote, "hooks", "pre-receive"), []byte(hook), 0o755); err != nil {
@@ -38,7 +65,7 @@ func RejectFirstPush(t *testing.T, remote string) {
 func Git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	if dir != "" {
-		args = append([]string{"-C", dir}, args...)
+		args = append([]string{"-C", RemoteDir(dir)}, args...)
 	}
 	out, err := exec.Command("git", args...).CombinedOutput()
 	if err != nil {

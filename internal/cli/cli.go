@@ -30,7 +30,7 @@ type command struct {
 
 // commands is the command table; usage is generated from it.
 var commands = []command{
-	{"init", "<repo-url> | --github NAME | --folder DIR  [--name NAME]", "set up a store on this machine (created if empty)", (*cli).init},
+	{"init", "<repo-url> | --github NAME | --folder DIR  [--name NAME] [--account GITHUB-USER]", "set up a store on this machine (created if empty)", (*cli).init},
 	{"store", "list | use NAME | forget NAME", "manage this machine's stores", (*cli).storeCmd},
 	{"sessions", "[--project DIR]", "list local sessions of a project", (*cli).sessions},
 	{"push", "<ids...> | --all | --all-projects [--force] [--include-active] [--project DIR]", "encrypt and push sessions to the store", (*cli).push},

@@ -109,6 +109,11 @@ func Install(id string, c *Contents, from Origin, destPath string, force bool) (
 		if err := writeAtomic(p, data); err != nil {
 			return res, err
 		}
+		if !from.Mtime.IsZero() { // as on the origin, not the time of the pull
+			if err := os.Chtimes(p, from.Mtime, from.Mtime); err != nil {
+				return res, err
+			}
+		}
 	}
 	if !res.Unchanged {
 		if err := writeAtomic(res.Target, transcript); err != nil {

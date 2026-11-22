@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"time"
 
@@ -11,10 +12,10 @@ import (
 
 // cachedRelation is a Status result, valid while neither copy changes.
 type cachedRelation struct {
-	mtime     time.Time // local copy
-	size      int64     // local copy
-	storeHash string    // store copy's ContentHash
-	rel       session.Relation
+	mtime    time.Time // local copy
+	size     int64     // local copy
+	storeKey string    // store copy's bundle and what its metadata records
+	rel      session.Relation
 }
 
 // Status relates each local session that the store also holds to its store
@@ -47,20 +48,31 @@ func (c *Client) Status(ctx context.Context, locals []session.Session) (map[stri
 				continue
 			}
 			hit, cached := c.status[s.ID]
-			if cached && hit.mtime.Equal(s.Mtime) && hit.size == s.Size && hit.storeHash == meta.ContentHash {
+			if cached && hit.mtime.Equal(s.Mtime) && hit.size == s.Size && hit.storeKey == storeKey(meta) {
 				out[s.ID] = hit.rel
 				continue
 			}
+			// Status never downloads a bundle: it compares with the
+			// metadata's record of entries. A copy pushed before that record
+			// existed stays Unknown (unless plainly in sync) until a push
+			// adds it.
 			rel := session.Unknown
-			if transcript, err := os.ReadFile(s.File); err == nil {
+			if transcript, err := os.ReadFile(s.File); err == nil && (meta.EntrySet != "" ||
+				(meta.Entries != "" && session.Fingerprint(transcript) == meta.Entries)) {
 				if r, err := c.compareWithStore(transcript, meta); err == nil {
 					rel = r
 				}
 			}
-			c.status[s.ID] = cachedRelation{s.Mtime, s.Size, meta.ContentHash, rel}
+			c.status[s.ID] = cachedRelation{s.Mtime, s.Size, storeKey(meta), rel}
 			out[s.ID] = rel
 		}
 		return nil
 	})
 	return out, err
+}
+
+// storeKey changes when a store copy's bundle or its metadata's record of
+// the entries changes (a push backfilling an older copy).
+func storeKey(m store.Meta) string {
+	return fmt.Sprintf("%s/%d/%s", m.ContentHash, m.Version, m.Entries)
 }

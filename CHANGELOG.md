@@ -49,6 +49,23 @@
 - The GUI could run two git operations on the store at once.
 
 ### Changed
+- A git store's clone holds only the sessions' metadata: setting up a
+  machine, opening the GUI, listing the store, sync status and previews
+  download no session data (a real 630 MB store sets up in 4 s instead of
+  2.5 min). A session's data is downloaded when it is pulled — one fetch
+  for all sessions of a pull — or when a push has to compare against a
+  copy pushed by an older version. Clones made by older versions switch
+  over on their next sync.
+- Pushes record in the metadata what the session holds (its entries) and
+  a preview of its last messages; a push also adds them to in-sync copies
+  pushed by older versions, without re-uploading those. Until then such
+  copies show "?" rather than being downloaded to compare.
+- "Active" means the transcript itself changed in the last 30 s; files a
+  pull writes no longer make every pulled session look active, and pulled
+  companion files keep their original times.
+- The pull dialog groups sessions by destination folder, with a count of
+  new ones, ones already here and folders still to create, and folder
+  mappings in a compact row with a button.
 - Pushing a session the store already has in sync no longer packs or
   encrypts it (the fingerprint recorded at push tells).
 - Listing local sessions reads a big transcript only at both ends (its
@@ -74,6 +91,10 @@
 - The GUI API accepts only the intended HTTP method per endpoint.
 
 ### Added
+- Pick the GitHub account a store uses, among those the GitHub CLI is
+  logged in to: when setting it up (GUI, or `init --account`) and when
+  unlocking it. git then signs in to github.com as that account (its
+  token comes from gh and is never written); other hosts never see it.
 - Session details in the GUI: an info button on every session shows its
   id, project, host, dates and resume command, with a preview of its last
   messages (decrypted for a store copy). Status badges are one word, and
@@ -92,6 +113,9 @@
   encrypting every session, then uploading them (git's file count), at
   most 5 commits per git push; the GUI shows the step and count, the CLI keeps a status line on
   the terminal.
+- The GUI shows what it is doing (deleting, compacting, syncing,
+  reading sessions) in the app bar with the current step, and holds the
+  other actions until it is done; sessions being deleted are greyed out.
 - Delete several store sessions at once in the GUI; the "not on this machine" count
   filters the store list to those, e.g. to delete sessions removed here.
 - Pull many sessions at once: `pull --all` / `pull <id>...` and **Pull

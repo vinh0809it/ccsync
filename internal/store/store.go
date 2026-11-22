@@ -29,9 +29,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/vinh0809it/ccsync/internal/crypto"
+	"github.com/vinh0809it/ccsync/internal/session"
 )
 
 // Format is the store format this version reads and writes.
@@ -58,9 +60,12 @@ var (
 // CompactResult is what Compact did.
 type CompactResult struct {
 	Commits int   `json:"commits"` // in the history before; 1 means it was already compact
-	Before  int64 `json:"before"`  // bytes the local clone's history took
+	Before  int64 `json:"before"`  // bytes the local clone's history took; -1: unknown (a partial clone)
 	After   int64 `json:"after"`
 }
+
+// MetaVersion marks metadata that records Entries, EntrySet and Preview.
+const MetaVersion = 1
 
 // Meta is the per-session metadata blob (stored encrypted).
 type Meta struct {
@@ -77,8 +82,18 @@ type Meta struct {
 	// Entries fingerprints the transcript's entries (session.Fingerprint),
 	// so a copy elsewhere can be found in sync without decrypting the
 	// bundle. Empty for copies pushed before ccsync 0.2.0.
-	Entries  string    `json:"entries,omitempty"`
+	Entries string `json:"entries,omitempty"`
+	// EntrySet records the entries themselves (session.EntrySet), so how a
+	// changed copy relates to this one needs no download either. Empty for
+	// copies pushed before it existed.
+	EntrySet string    `json:"entry_set,omitempty"`
 	PushedAt time.Time `json:"pushed_at"`
+	// Preview holds the session's last messages, so they show without
+	// downloading the bundle. Empty for copies pushed before it existed.
+	Preview []session.Message `json:"preview,omitempty"`
+	// Version is the MetaVersion the metadata was written with; 0 for
+	// copies pushed before it existed.
+	Version int `json:"meta_version,omitempty"`
 }
 
 // Store is one store as this machine sees it.
@@ -90,11 +105,21 @@ type Store struct {
 
 	lockFile string // serializes ccsync processes using this store
 	t        transport
+
+	account string // Entry.Account
+	token   string // its token, once fetched
 }
+
+// TokenFor returns a GitHub account's token (for Entry.Account); set by
+// the app, so this package needs no GitHub CLI.
+var TokenFor func(account string) (string, error)
 
 // Open returns the store described by e.
 func Open(e Entry) *Store {
 	s := &Store{Dir: e.Dir, Interactive: true}
+	if strings.HasPrefix(e.RepoURL, "https://github.com/") {
+		s.account = e.Account // a GitHub login means nothing to another host
+	}
 	if e.Name != "" {
 		s.lockFile, _ = lockPath(e.Name)
 	}
@@ -230,12 +255,23 @@ func (s *Store) PushProgress(progress func(UploadProgress)) error { return s.t.p
 // History is the size of a git store's history (see Store.History).
 type History struct {
 	Commits int   `json:"commits"`
-	Bytes   int64 `json:"bytes"` // this machine's clone; the remote's is about the same
+	Bytes   int64 `json:"bytes"` // this machine's clone (about the remote's); -1: unknown, a partial clone
 }
 
 // History reports how much the store's history holds, to tell when
 // Compact is worth it. ErrNoHistory for a synced folder.
 func (s *Store) History() (History, error) { return s.t.history() }
+
+// Prefetch downloads the bundles of the sessions ids in one go, ahead of
+// reading them (a git store's clone has none until read).
+func (s *Store) Prefetch(ids []string) error {
+	for _, id := range ids {
+		if err := checkID(id); err != nil {
+			return err
+		}
+	}
+	return s.t.prefetch(ids)
+}
 
 // Compact replaces the store's history with a single commit holding its
 // current files, so replaced and deleted versions stop taking space. Old

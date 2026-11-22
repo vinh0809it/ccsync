@@ -158,6 +158,13 @@ func (c *Client) PullMany(ids []string, m PathMap, force bool) (res PullManyResu
 		for _, id := range unreadable {
 			res.Failed = append(res.Failed, PullFailure{ID: id, Err: fmt.Errorf("can't be read (pushed by an outdated ccsync? run: ccsync migrate)")})
 		}
+		// One download for all of them, not one per session.
+		c.progress("Downloading", 0, 0)
+		var want []string
+		for _, m := range metas {
+			want = append(want, m.SessionID)
+		}
+		_ = c.store.Prefetch(want) // only a speed-up: each read downloads what's still missing
 		for i, meta := range metas {
 			c.progress("Pulling", i, len(metas))
 			if meta.OriginalCwd == "" {

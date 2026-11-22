@@ -6,6 +6,7 @@ package github
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -14,8 +15,19 @@ import (
 // ErrNoCLI means `gh` is not installed or not logged in.
 var ErrNoCLI = errors.New("the GitHub CLI (gh) is not installed or not logged in — see https://cli.github.com, then run: gh auth login")
 
-func gh(args ...string) (string, error) {
-	out, err := exec.Command("gh", args...).CombinedOutput()
+func gh(args ...string) (string, error) { return ghAs("", args...) }
+
+// ghAs runs gh as account (the active gh account when empty).
+func ghAs(account string, args ...string) (string, error) {
+	cmd := exec.Command("gh", args...)
+	if account != "" {
+		token, err := Token(account)
+		if err != nil {
+			return "", err
+		}
+		cmd.Env = append(os.Environ(), "GH_TOKEN="+token)
+	}
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		var exit *exec.ExitError
 		if !errors.As(err, &exit) {
@@ -47,12 +59,12 @@ func Repo(url string) string {
 // IsPublic reports whether the GitHub repo at url is public. It returns an
 // error when that can't be determined (not a GitHub URL, no `gh`, no
 // access).
-func IsPublic(url string) (bool, error) {
+func IsPublic(url, account string) (bool, error) {
 	repo := Repo(url)
 	if repo == "" {
 		return false, fmt.Errorf("%s is not a GitHub repo URL", url)
 	}
-	vis, err := gh("repo", "view", repo, "--json", "visibility", "--jq", ".visibility")
+	vis, err := ghAs(account, "repo", "view", repo, "--json", "visibility", "--jq", ".visibility")
 	if err != nil {
 		return false, err
 	}
@@ -63,17 +75,53 @@ func IsPublic(url string) (bool, error) {
 // account, or "owner/name") and returns its https clone URL. Git reaches it
 // with gh's credentials when `gh auth setup-git` has been run (gh auth
 // login offers it).
-func CreatePrivate(name string) (string, error) {
+func CreatePrivate(name, account string) (string, error) {
 	if !regexp.MustCompile(`^(?:[\w.-]+/)?[\w.-]+$`).MatchString(name) {
 		return "", fmt.Errorf("invalid repo name %q", name)
 	}
-	if _, err := gh("repo", "create", name, "--private",
+	if _, err := ghAs(account, "repo", "create", name, "--private",
 		"--description", "Encrypted Claude Code session store (ccsync)"); err != nil {
 		return "", err
 	}
-	url, err := gh("repo", "view", name, "--json", "url", "--jq", ".url")
+	url, err := ghAs(account, "repo", "view", name, "--json", "url", "--jq", ".url")
 	if err != nil {
 		return "", err
 	}
 	return url + ".git", nil
+}
+
+// accountLine matches gh auth status's "Logged in to github.com account NAME".
+var accountLine = regexp.MustCompile(`Logged in to github\.com account ([\w-]+)`)
+
+// Accounts lists the GitHub accounts gh is logged in to, the active one
+// first; none when gh is missing.
+func Accounts() []string {
+	out, err := gh("auth", "status", "--hostname", "github.com")
+	if err != nil {
+		return nil
+	}
+	return parseAccounts(out)
+}
+
+func parseAccounts(status string) []string {
+	var names []string
+	for _, m := range accountLine.FindAllStringSubmatch(status, -1) {
+		names = append(names, m[1])
+	}
+	return names
+}
+
+var accountName = regexp.MustCompile(`^[\w-]+$`)
+
+// Token returns account's GitHub token from gh, for git to authenticate
+// as that account.
+func Token(account string) (string, error) {
+	if !accountName.MatchString(account) {
+		return "", fmt.Errorf("invalid GitHub account %q", account)
+	}
+	out, err := exec.Command("gh", "auth", "token", "--hostname", "github.com", "--user", account).Output()
+	if err != nil {
+		return "", fmt.Errorf("gh has no login for the GitHub account %s — run: gh auth login", account)
+	}
+	return strings.TrimSpace(string(out)), nil
 }

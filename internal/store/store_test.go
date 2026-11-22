@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -119,7 +120,7 @@ func TestNothingReadableInRemote(t *testing.T) {
 
 	// The working tree holds the uncompressed blobs; git objects in the
 	// remote are compressed but checked too.
-	for _, root := range []string{st.path(sessionsDir), remote} {
+	for _, root := range []string{st.path(sessionsDir), testutil.RemoteDir(remote)} {
 		for _, marker := range []string{"MARKER_SECRET_CONTENT", "MARKER_SECRET_TITLE", "MARKER_HOSTNAME", "topsecret", "alice"} {
 			if grepTree(t, root, marker) {
 				t.Fatalf("plaintext %q found under %s", marker, root)
@@ -232,7 +233,7 @@ func TestSyncRecoversDirtyClone(t *testing.T) {
 		t.Fatal(err)
 	}
 	put(t, st, key, "77777777-aaaa-bbbb-cccc-000000000002", "staged")
-	testutil.Git(t, st.Dir, "add", "-A")
+	testutil.Git(t, st.Dir, "add", "-A", "--sparse") // bundles are outside the checkout
 	os.WriteFile(st.path("stray.txt"), []byte("junk"), 0o644)
 	os.WriteFile(st.path(markerFile), []byte("garbage"), 0o644)
 
@@ -545,10 +546,236 @@ func TestPushInParts(t *testing.T) {
 		t.Fatal("remote is not at the clone's HEAD")
 	}
 	h, err := st.History()
-	if err != nil || h.Commits != 13 || h.Bytes <= 0 {
+	if err != nil || h.Commits != 13 || h.Bytes == 0 { // -1: a partial clone
 		t.Fatalf("history = %+v %v", h, err)
 	}
 	if _, err := Open(Entry{Name: "f", Kind: KindFolder, Dir: t.TempDir()}).History(); !errors.Is(err, ErrNoHistory) {
 		t.Fatalf("folder history: %v", err)
+	}
+}
+
+// TestBundlesLoadLazily: a clone checks out only metadata; bundles are
+// read from git on demand, and rewriting or removing a session leaves no
+// stale bundle part in the store.
+func TestBundlesLoadLazily(t *testing.T) {
+	remote := testutil.Remote(t)
+	a := machine(t)
+	keyA := open(t, a, remote)
+	big, small := "57575757-bbbb-bbbb-cccc-000000000001", "57575757-bbbb-bbbb-cccc-000000000002"
+	bigData := strings.Repeat("x", partSize+123) // two parts
+	put(t, a, keyA, big, bigData)
+	put(t, a, keyA, small, "small")
+	publish(t, a)
+	if parts, _ := filepath.Glob(a.path(sessionsDir, "*", "data.age*")); len(parts) != 0 {
+		t.Fatalf("bundles left in the checkout after a commit: %v", parts)
+	}
+
+	b := machine(t)
+	keyB := open(t, b, remote)
+	if parts, _ := filepath.Glob(b.path(sessionsDir, "*", "data.age*")); len(parts) != 0 {
+		t.Fatalf("a new clone checked out bundles: %v", parts)
+	}
+	if n := testutil.MissingObjects(t, b.Dir); n < 3 { // both bundles' parts
+		t.Fatalf("clone has %d missing objects: not partial", n)
+	}
+	if metas, _, err := b.List(keyB); err != nil || len(metas) != 2 {
+		t.Fatalf("list without bundles: %d %v", len(metas), err)
+	}
+	if data, err := payload(t, b, keyB, big); err != nil || string(data) != bigData {
+		t.Fatalf("lazy read: len %d, %v", len(data), err)
+	}
+
+	// B shrinks the big session to one part and removes the small one.
+	put(t, b, keyB, big, "now small")
+	if _, err := b.Remove(small); err != nil {
+		t.Fatal(err)
+	}
+	publish(t, b)
+	files := testutil.RemoteFiles(t, remote)
+	if strings.Contains(files, big+"/data.age.1") || strings.Contains(files, small) {
+		t.Fatalf("stale bundle files in the store:\n%s", files)
+	}
+	if !strings.Contains(files, big+"/data.age") {
+		t.Fatalf("bundle missing from the store:\n%s", files)
+	}
+	if err := a.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := payload(t, a, keyA, big); err != nil || string(data) != "now small" {
+		t.Fatalf("machine A after B's rewrite: %q %v", data, err)
+	}
+	if out := testutil.Git(t, a.Dir, "status", "--porcelain"); out != "" {
+		t.Fatalf("clone dirty: %q", out)
+	}
+	// A clone made by an older ccsync has every bundle checked out; the
+	// next sync drops them from the checkout, losing nothing.
+	testutil.Git(t, a.Dir, "sparse-checkout", "disable")
+	if _, err := os.Stat(a.path(sessionsDir, big, "data.age")); err != nil {
+		t.Fatal("full checkout expected")
+	}
+	if err := a.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(a.path(sessionsDir, big, "data.age")); !os.IsNotExist(err) {
+		t.Fatal("bundle still checked out after sync")
+	}
+	if data, err := payload(t, a, keyA, big); err != nil || string(data) != "now small" {
+		t.Fatalf("after converting the clone: %q %v", data, err)
+	}
+}
+
+// TestSyncDropsUnpublishedBundles: a bundle written but never committed
+// (a push that failed midway) must not survive a sync, or a later commit
+// would publish it under metadata it doesn't match.
+func TestSyncDropsUnpublishedBundles(t *testing.T) {
+	remote := testutil.Remote(t)
+	st := machine(t)
+	key := open(t, st, remote)
+	id := "59595959-aaaa-bbbb-cccc-000000000001"
+	put(t, st, key, id, "published")
+	publish(t, st)
+	put(t, st, key, id, "never published")
+	if err := st.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	if parts, _ := filepath.Glob(st.path(sessionsDir, id, "data.age*")); len(parts) != 0 {
+		t.Fatalf("unpublished bundle left after sync: %v", parts)
+	}
+	if data, err := payload(t, st, key, id); err != nil || string(data) != "published" {
+		t.Fatalf("payload after sync: %q %v", data, err)
+	}
+	put(t, st, key, "59595959-aaaa-bbbb-cccc-000000000002", "other")
+	publish(t, st)
+	if data, err := payload(t, st, key, id); err != nil || string(data) != "published" {
+		t.Fatalf("payload after an unrelated push: %q %v", data, err)
+	}
+}
+
+// TestOlderCloneBecomesPartial: a full clone (made by an older ccsync)
+// stops downloading bundles it doesn't read.
+func TestOlderCloneBecomesPartial(t *testing.T) {
+	remote := testutil.Remote(t)
+	a := machine(t)
+	keyA := open(t, a, remote)
+	put(t, a, keyA, "60606060-aaaa-bbbb-cccc-000000000001", "first")
+	publish(t, a)
+
+	old := machine(t)
+	testutil.Git(t, "", "clone", "-q", remote, old.Dir) // full, every bundle checked out
+	if err := old.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	put(t, a, keyA, "60606060-aaaa-bbbb-cccc-000000000002", "second")
+	publish(t, a)
+	if err := old.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	if n := testutil.MissingObjects(t, old.Dir); n == 0 {
+		t.Fatal("the converted clone downloaded the new bundle")
+	}
+	key, err := old.Unlock(pass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, err := payload(t, old, key, "60606060-aaaa-bbbb-cccc-000000000002"); err != nil || string(data) != "second" {
+		t.Fatalf("read after conversion: %q %v", data, err)
+	}
+}
+
+// TestPrefetch: one fetch brings exactly the asked sessions' current
+// bundles — not other sessions', not old versions.
+func TestPrefetch(t *testing.T) {
+	remote := testutil.Remote(t)
+	a := machine(t)
+	keyA := open(t, a, remote)
+	one, two := "61616161-aaaa-bbbb-cccc-000000000001", "61616161-aaaa-bbbb-cccc-000000000002"
+	put(t, a, keyA, one, "old version")
+	publish(t, a)
+	put(t, a, keyA, one, "current")
+	put(t, a, keyA, two, "other")
+	publish(t, a)
+
+	b := machine(t)
+	keyB := open(t, b, remote)
+	before := testutil.MissingObjects(t, b.Dir)
+	if err := b.Prefetch([]string{one}); err != nil {
+		t.Fatal(err)
+	}
+	if got := before - testutil.MissingObjects(t, b.Dir); got != 1 {
+		t.Fatalf("prefetch brought %d objects, want 1", got)
+	}
+	if data, err := payload(t, b, keyB, one); err != nil || string(data) != "current" {
+		t.Fatalf("payload = %q %v", data, err)
+	}
+	if err := b.Prefetch([]string{one}); err != nil { // nothing left to fetch
+		t.Fatal(err)
+	}
+}
+
+// TestCompactFromLazyClone: a machine that never downloaded a bundle can
+// compact; the bundles stay intact for everyone.
+func TestCompactFromLazyClone(t *testing.T) {
+	remote := testutil.Remote(t)
+	a := machine(t)
+	keyA := open(t, a, remote)
+	id := "62626262-aaaa-bbbb-cccc-000000000001"
+	put(t, a, keyA, id, "v1")
+	publish(t, a)
+	put(t, a, keyA, id, "v2")
+	publish(t, a)
+
+	b := machine(t)
+	open(t, b, remote)
+	if testutil.MissingObjects(t, b.Dir) == 0 {
+		t.Fatal("clone is not partial")
+	}
+	if r, err := b.Compact(); err != nil || r.Commits < 2 {
+		t.Fatalf("compact = %+v %v", r, err)
+	}
+	if n := testutil.Git(t, remote, "rev-list", "--count", "HEAD"); n != "1" {
+		t.Fatalf("remote has %s commits", n)
+	}
+	if err := a.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := payload(t, a, keyA, id); err != nil || string(data) != "v2" {
+		t.Fatalf("after compact: %q %v", data, err)
+	}
+	c := machine(t)
+	keyC := open(t, c, remote)
+	if data, err := payload(t, c, keyC, id); err != nil || string(data) != "v2" {
+		t.Fatalf("fresh clone after compact: %q %v", data, err)
+	}
+}
+
+// TestAccountAuth: a store with a GitHub account runs git with a helper
+// answering that account's token — from the environment, never on disk —
+// and replaces git's own helpers.
+func TestAccountAuth(t *testing.T) {
+	old := TokenFor
+	t.Cleanup(func() { TokenFor = old })
+	asked := 0
+	TokenFor = func(account string) (string, error) { asked++; return "tok-" + account, nil }
+	st := Open(Entry{Name: "x", Dir: t.TempDir(), RepoURL: "https://github.com/alice/s.git", Account: "alice"})
+	g := gitTransport{st}
+	for i := 0; i < 2; i++ {
+		cmd, err := g.authed(g.command(st.Dir, "fetch"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		args := strings.Join(cmd.Args, " ")
+		if !strings.Contains(args, "-c credential.https://github.com.helper= -c credential.https://github.com.helper=!f()") || strings.Contains(args, "tok-alice") {
+			t.Fatalf("args = %s", args)
+		}
+		if !slices.Contains(cmd.Env, "CCSYNC_GIT_TOKEN=tok-alice") {
+			t.Fatal("token not in the environment")
+		}
+	}
+	if asked != 1 {
+		t.Fatalf("token fetched %d times", asked)
+	}
+	plain := Open(Entry{Name: "y", Dir: t.TempDir(), RepoURL: "https://gitlab.com/alice/s.git", Account: "alice"}) // not GitHub
+	if cmd, _ := (gitTransport{plain}).authed(gitTransport{plain}.command(plain.Dir, "fetch")); strings.Contains(strings.Join(cmd.Args, " "), "credential.helper") {
+		t.Fatal("a store without an account changed git's credentials")
 	}
 }

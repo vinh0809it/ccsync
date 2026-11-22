@@ -485,3 +485,28 @@ func TestPreview(t *testing.T) {
 		t.Fatal("timestamp lost")
 	}
 }
+
+// TestCompareSet: comparing with a recorded EntrySet agrees with comparing
+// with the transcript itself.
+func TestCompareSet(t *testing.T) {
+	u := func(ids ...string) []byte {
+		var b strings.Builder
+		for _, id := range ids {
+			b.WriteString(`{"type":"user","uuid":"` + id + `"}` + "\n")
+		}
+		return []byte(b.String())
+	}
+	base := u("a", "b")
+	for name, other := range map[string][]byte{
+		"same": u("b", "a"), "ahead": u("a", "b", "c"), "behind": u("a"),
+		"diverged": u("a", "x"), "renamed": append(u("a", "b"), `{"type":"custom-title","customTitle":"t"}`...),
+		"empty": []byte(`{"type":"system"}`),
+	} {
+		if got, want := CompareSet(other, EntrySet(base)), Compare(other, base); got != want {
+			t.Errorf("%s: CompareSet = %v, Compare = %v", name, got, want)
+		}
+	}
+	if EntrySet([]byte("not json")) != "" {
+		t.Error("EntrySet of a transcript without entries")
+	}
+}

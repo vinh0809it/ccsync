@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
-	"time"
 
 	"github.com/vinh0809it/ccsync/internal/app"
 	"github.com/vinh0809it/ccsync/internal/gui"
@@ -21,10 +20,11 @@ func (c *cli) init(args []string) error {
 	ghRepo := fs.String("github", "", "create this private GitHub repo (`name` or owner/name) through the GitHub CLI")
 	folder := fs.String("folder", "", "keep the store in this synced folder (Dropbox, iCloud Drive, ...) instead of git")
 	allowPublic := fs.Bool("allow-public", false, "accept a public GitHub repo")
-	if err := c.parseFlags(fs, args, "name", "github", "folder"); err != nil {
+	account := fs.String("account", "", "GitHub `account` (one gh is logged in to) git uses for this store")
+	if err := c.parseFlags(fs, args, "name", "github", "folder", "account"); err != nil {
 		return err
 	}
-	spec := app.NewStore{Name: *name, AllowPublic: *allowPublic}
+	spec := app.NewStore{Name: *name, AllowPublic: *allowPublic, Account: *account}
 	switch {
 	case *folder != "" && *ghRepo == "" && fs.NArg() == 0:
 		spec.Kind, spec.Location = store.KindFolder, *folder
@@ -140,7 +140,7 @@ func (c *cli) sessions(args []string) error {
 	sort.Slice(sessions, func(i, j int) bool { return sessions[i].Mtime.After(sessions[j].Mtime) })
 	for _, s := range sessions {
 		live := ""
-		if time.Since(s.Mtime) < app.ActiveGrace {
+		if app.IsActive(s) {
 			live = "  [active]"
 		}
 		fmt.Fprintf(c.out, "%s  %s  %7s  %s%s\n",
@@ -465,8 +465,12 @@ func (c *cli) compact(args []string) error {
 		fmt.Fprintln(c.out, "The store's history is already a single commit.")
 		return nil
 	}
-	fmt.Fprintf(c.out, "Compacted %d commits into 1; this clone's history went from %s to %s.\n",
-		r.Commits, humanSize(r.Before), humanSize(r.After))
+	if r.Before < 0 {
+		fmt.Fprintf(c.out, "Compacted %d commits into 1.\n", r.Commits)
+	} else {
+		fmt.Fprintf(c.out, "Compacted %d commits into 1; this clone's history went from %s to %s.\n",
+			r.Commits, humanSize(r.Before), humanSize(r.After))
+	}
 	fmt.Fprintln(c.out, "The git host may take a while to reclaim the space of the old history.")
 	return nil
 }

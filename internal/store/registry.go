@@ -28,6 +28,9 @@ type Entry struct {
 	Kind    Kind   `json:"kind,omitempty"`     // empty means git (0.2 registries)
 	RepoURL string `json:"repo_url,omitempty"` // git stores
 	Dir     string `json:"dir"`                // git: local clone; folder: the synced folder
+	// Account is the GitHub account (one gh is logged in to) git uses for
+	// this store; empty: git's own credentials, as for any repo.
+	Account string `json:"account,omitempty"`
 }
 
 // Location is where the store is shared: the repo URL, or the folder.

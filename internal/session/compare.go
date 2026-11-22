@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"maps"
 	"slices"
+	"strings"
 )
 
 // Relation says how one copy of a session's transcript relates to another.
@@ -41,8 +42,41 @@ func (r Relation) String() string {
 }
 
 // Compare returns how transcript a relates to transcript b.
-func Compare(a, b []byte) Relation {
-	ua, ub := entryIDs(a), entryIDs(b)
+func Compare(a, b []byte) Relation { return compareIDs(entryIDs(a), entryIDs(b)) }
+
+// EntrySet records a transcript's entries compactly enough to keep in a
+// store's metadata: a short hash of each, sorted. CompareSet relates
+// another transcript to it as Compare would to the transcript itself, so
+// sync status needs no download. "" for a transcript without entries.
+func EntrySet(transcript []byte) string {
+	hashed := hashIDs(entryIDs(transcript))
+	return strings.Join(slices.Sorted(maps.Keys(hashed)), "")
+}
+
+// CompareSet returns how transcript a relates to the transcript whose
+// EntrySet is set.
+func CompareSet(a []byte, set string) Relation {
+	ub := map[string]struct{}{}
+	for i := 0; i+entryHashLen <= len(set); i += entryHashLen {
+		ub[set[i:i+entryHashLen]] = struct{}{}
+	}
+	return compareIDs(hashIDs(entryIDs(a)), ub)
+}
+
+// entryHashLen is the hex length of an entry's hash in an EntrySet: 48
+// bits, so a clash among a session's entries is vanishingly unlikely.
+const entryHashLen = 12
+
+func hashIDs(ids map[string]struct{}) map[string]struct{} {
+	out := make(map[string]struct{}, len(ids))
+	for id := range ids {
+		sum := sha256.Sum256([]byte(id))
+		out[hex.EncodeToString(sum[:entryHashLen/2])] = struct{}{}
+	}
+	return out
+}
+
+func compareIDs(ua, ub map[string]struct{}) Relation {
 	if len(ua) == 0 || len(ub) == 0 {
 		return Unknown
 	}

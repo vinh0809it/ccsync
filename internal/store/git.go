@@ -23,11 +23,40 @@ func (g gitTransport) git(args ...string) (string, error) {
 }
 
 func (g gitTransport) gitIn(dir string, args ...string) (string, error) {
-	out, err := g.command(dir, args...).CombinedOutput()
+	cmd, err := g.authed(g.command(dir, args...))
+	if err != nil {
+		return "", err
+	}
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(out)))
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// authed makes cmd authenticate as the store's GitHub account, if it has
+// one: for github.com only, git's own credential helpers are replaced by
+// one answering with that account's token, handed over in the environment
+// (never written anywhere). Other hosts never see the token.
+func (g gitTransport) authed(cmd *exec.Cmd) (*exec.Cmd, error) {
+	if g.s.account == "" {
+		return cmd, nil
+	}
+	if g.s.token == "" {
+		if TokenFor == nil {
+			return nil, fmt.Errorf("no way to get a token for the GitHub account %s", g.s.account)
+		}
+		token, err := TokenFor(g.s.account)
+		if err != nil {
+			return nil, err
+		}
+		g.s.token = token
+	}
+	helper := `!f() { test "$1" = get && echo username=x-access-token && echo "password=$CCSYNC_GIT_TOKEN"; }; f`
+	const key = "credential.https://github.com.helper"
+	cmd.Args = append(cmd.Args[:1], append([]string{"-c", key + "=", "-c", key + "=" + helper}, cmd.Args[1:]...)...)
+	cmd.Env = append(cmd.Env, "CCSYNC_GIT_TOKEN="+g.s.token)
+	return cmd, nil
 }
 
 // command prepares git to run in dir with the store's settings.
@@ -62,8 +91,19 @@ func (g gitTransport) open(repoURL string) error {
 		if err := os.MkdirAll(filepath.Dir(g.s.Dir), 0o700); err != nil {
 			return err
 		}
-		if _, err := g.gitIn(".", "clone", "--quiet", "--", repoURL, g.s.Dir); err != nil {
+		// A partial clone checking out no bundle (see lazy): only the
+		// metadata is downloaded now. Hosts without partial-clone support
+		// send everything, as before.
+		if _, err := g.gitIn(".", "clone", "--quiet", "--no-checkout", "--filter=blob:none", "--", repoURL, g.s.Dir); err != nil {
 			return err
+		}
+		if err := g.lazy(); err != nil {
+			return err
+		}
+		if _, err := g.git("rev-parse", "--verify", "--quiet", "HEAD"); err == nil {
+			if _, err := g.git("reset", "--hard", "--quiet", "HEAD"); err != nil {
+				return err
+			}
 		}
 	} else {
 		// The clone must track the same remote, or every later push would
@@ -111,6 +151,9 @@ func (g gitTransport) sync() error {
 	if _, err := g.git("fetch", "--quiet", "origin"); err != nil {
 		return err
 	}
+	if err := g.lazy(); err != nil {
+		return err
+	}
 	// sync discards local changes: be sure this is a ccsync store first.
 	if !g.upstreamIsStore() {
 		return fmt.Errorf("%s does not track a ccsync store (no %s upstream) — forget it (ccsync store forget) and set it up again", g.s.Dir, markerFile)
@@ -118,8 +161,10 @@ func (g gitTransport) sync() error {
 	if _, err := g.git("reset", "--hard", "--quiet", "@{u}"); err != nil {
 		return err
 	}
-	_, err := g.git("clean", "-fdq")
-	return err
+	if _, err := g.git("clean", "-fdq"); err != nil {
+		return err
+	}
+	return g.dropStrayParts()
 }
 
 // upstreamIsStore reports whether the fetched upstream holds a store marker.
@@ -139,10 +184,15 @@ func (g gitTransport) commit(message string) error {
 	if len(paths) == 0 {
 		return ErrNothingToCommit
 	}
-	if _, err := g.git(append([]string{"add", "-A", "--"}, paths...)...); err != nil {
+	// Bundles are staged by stageParts; they are outside the checkout.
+	exclude := ":(exclude,glob)" + sessionsDir + "/*/data.age*"
+	if _, err := g.git(append(append([]string{"add", "-A", "--"}, paths...), exclude)...); err != nil {
 		return err
 	}
-	out, err := g.git(append([]string{"status", "--porcelain", "--"}, paths...)...)
+	if err := g.stageParts(); err != nil {
+		return err
+	}
+	out, err := g.git("diff", "--cached", "--name-only")
 	if err != nil {
 		return err
 	}
@@ -235,7 +285,8 @@ func remoteMoved(err error) error {
 	return err
 }
 
-// History is how much a git store's history holds.
+// History is how much a git store's history holds. A partial clone holds
+// only part of it locally, so its size is unknown (-1) there.
 func (g gitTransport) history() (History, error) {
 	count, err := g.git("rev-list", "--count", "HEAD")
 	if err != nil {
@@ -255,7 +306,10 @@ var writingObjects = regexp.MustCompile(`Writing objects:\s+\d+% \((\d+)/(\d+)\)
 // gitProgress runs git like git(), reporting its "Writing objects"
 // progress as it streams by.
 func (g gitTransport) gitProgress(progress func(done, total int), args ...string) error {
-	cmd := g.command(g.s.Dir, args...)
+	cmd, err := g.authed(g.command(g.s.Dir, args...))
+	if err != nil {
+		return err
+	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return err
@@ -350,8 +404,12 @@ func (g gitTransport) compact() (CompactResult, error) {
 	return r, err
 }
 
-// historySize is how many bytes the clone's git objects take.
+// historySize is how many bytes the clone's git objects take; -1 for a
+// partial clone, which holds only part of the history.
 func (g gitTransport) historySize() (int64, error) {
+	if partial, _ := g.git("config", "--get", "remote.origin.promisor"); partial == "true" {
+		return -1, nil
+	}
 	out, err := g.git("count-objects", "-v")
 	if err != nil {
 		return 0, err

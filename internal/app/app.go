@@ -143,9 +143,18 @@ func (c *Client) History() (h store.History, err error) {
 	return h, err
 }
 
-// Preview returns the last n messages of a session's store copy.
-func (c *Client) Preview(id string, n int) (msgs []session.Message, err error) {
+// PreviewMessages is how many messages a preview shows.
+const PreviewMessages = 6
+
+// Preview returns the last messages of a session's store copy: from its
+// metadata, or, for a copy pushed before previews were recorded, from its
+// bundle (downloading it).
+func (c *Client) Preview(id string) (msgs []session.Message, err error) {
 	err = c.locked(func() error {
+		if m, found, err := c.store.Lookup(c.key, id); err == nil && found && len(m.Preview) > 0 {
+			msgs = m.Preview
+			return nil
+		}
 		payload, err := c.store.OpenPayload(c.key, id)
 		if err != nil {
 			return err
@@ -155,7 +164,7 @@ func (c *Client) Preview(id string, n int) (msgs []session.Message, err error) {
 		if err != nil {
 			return err
 		}
-		msgs, err = session.Preview(bytes.NewReader(contents.Transcript), n)
+		msgs, err = session.Preview(bytes.NewReader(contents.Transcript), PreviewMessages)
 		return err
 	})
 	return msgs, err
